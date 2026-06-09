@@ -1,0 +1,730 @@
+<!-- 
+  PORTFOLIO SETTINGS PAGE
+  Tambahkan ini ke dashboard.html:
+  1. Nav item baru (di sidebar)
+  2. Page baru (di main content)
+  3. Data & methods baru (di Vue setup)
+-->
+
+<!-- ═══════════════════════════════════════════
+  A. TAMBAHKAN NAV ITEM INI DI SIDEBAR
+  (setelah nav-item "Transaksi")
+═══════════════════════════════════════════ -->
+<!--
+<div class="nav-item" :class="{active:page==='settings'}" @click="page='settings'">
+  <span class="nav-icon">⚙</span> Portfolio
+</div>
+-->
+
+<!-- ═══════════════════════════════════════════
+  B. HALAMAN PORTFOLIO SETTINGS (FULL PAGE)
+  Taruh sebelum closing </div> app
+═══════════════════════════════════════════ -->
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portfolio Settings — Omni-Invest</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.4.21/vue.global.prod.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<style>
+:root{--bg:#0a0c10;--bg2:#0f1219;--bg3:#151a24;--surface:#1a2133;--border:#232d42;--accent:#00e5a0;--blue:#0084ff;--orange:#ff6b35;--warn:#ffd93d;--danger:#ff4757;--text:#e8edf5;--text2:#8899bb;--text3:#4a5878;--green:#00e5a0;--red:#ff4757;--mono:'Courier New',monospace}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:24px}
+body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,229,160,0.02) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,160,0.02) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
+.wrap{max-width:900px;margin:0 auto;position:relative;z-index:1}
+.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+.page-title{font-weight:800;font-size:20px}
+.page-sub{font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:3px}
+.btn{padding:8px 14px;border:none;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer;transition:all 0.15s}
+.btn-primary{background:var(--accent);color:#000}.btn-primary:hover{background:#00ffb3}
+.btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border)}.btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+.btn-danger{background:rgba(255,71,87,0.15);color:var(--red);border:1px solid rgba(255,71,87,0.3)}
+.btn-blue{background:rgba(0,132,255,0.15);color:var(--blue);border:1px solid rgba(0,132,255,0.3)}
+.btn-sm{padding:5px 10px;font-size:11px}
+.tabs{display:flex;gap:0;margin-bottom:20px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:4px}
+.tab{flex:1;padding:8px;text-align:center;cursor:pointer;border-radius:6px;font-size:13px;font-weight:600;color:var(--text3);transition:all 0.15s}
+.tab.active{background:var(--surface);color:var(--accent)}
+.tab:hover:not(.active){color:var(--text2)}
+.card{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:16px;position:relative;overflow:hidden}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(0,229,160,0.2),transparent)}
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.section-title{font-weight:700;font-size:14px}
+.badge{display:inline-flex;align-items:center;padding:3px 8px;border-radius:4px;font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase}
+.badge-green{background:rgba(0,229,160,0.1);color:var(--accent);border:1px solid rgba(0,229,160,0.25)}
+.badge-warn{background:rgba(255,217,61,0.1);color:var(--warn);border:1px solid rgba(255,217,61,0.25)}
+.badge-red{background:rgba(255,71,87,0.1);color:var(--red);border:1px solid rgba(255,71,87,0.3)}
+
+/* ASSET ITEM */
+.asset-item{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:10px;transition:border-color 0.15s}
+.asset-item:hover{border-color:var(--accent)}
+.asset-item.editing{border-color:var(--blue);background:rgba(0,132,255,0.04)}
+.asset-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:0}
+.asset-name{font-weight:700;font-size:14px}
+.asset-sub{font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:2px}
+.asset-actions{display:flex;gap:6px}
+.asset-detail{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+.detail-item{font-family:var(--mono);font-size:11px}
+.detail-label{color:var(--text3);font-size:9px;letter-spacing:1px;text-transform:uppercase;margin-bottom:3px}
+.detail-value{color:var(--text);font-weight:700}
+.detail-value.up{color:var(--green)}
+.detail-value.down{color:var(--red)}
+
+/* FORM */
+.form-section{margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}
+.form-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.form-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px}
+.form-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px}
+.form-group{display:flex;flex-direction:column;gap:5px}
+.form-label{font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:1px;text-transform:uppercase}
+.form-label.required::after{content:' *';color:var(--red)}
+.form-input{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:9px 11px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none;transition:border-color 0.15s;width:100%}
+.form-input:focus{border-color:var(--accent)}
+.form-input.error{border-color:var(--red)}
+option{background:var(--bg3)}
+
+/* ADD FORM */
+.add-form{background:var(--bg2);border:1px solid var(--blue);border-radius:10px;padding:18px;margin-bottom:16px}
+.add-form-title{font-weight:700;font-size:14px;color:var(--blue);margin-bottom:14px;display:flex;align-items:center;gap:8px}
+
+/* PREVIEW */
+.preview-box{background:var(--bg);border:1px solid var(--accent);border-radius:10px;padding:18px;margin-top:16px}
+.preview-title{font-family:var(--mono);font-size:10px;color:var(--accent);letter-spacing:2px;text-transform:uppercase;margin-bottom:14px}
+.preview-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.preview-item{background:var(--surface);border-radius:8px;padding:12px}
+.preview-label{font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:1px;margin-bottom:5px;text-transform:uppercase}
+.preview-val{font-family:var(--mono);font-size:16px;font-weight:700}
+.preview-change{font-family:var(--mono);font-size:11px;margin-top:3px}
+.preview-compare{margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;font-family:var(--mono);font-size:11px}
+.preview-arrow{color:var(--accent);font-size:16px;text-align:center}
+.preview-before{color:var(--text3)}
+.preview-after{color:var(--text);font-weight:700}
+
+/* ALLOC BARS */
+.alloc-section{margin-top:14px;padding:14px;background:var(--bg2);border-radius:8px}
+.alloc-row{margin-bottom:12px}
+.alloc-row:last-child{margin-bottom:0}
+.alloc-label-row{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--text2);margin-bottom:4px}
+.alloc-bar-bg{height:6px;background:var(--surface);border-radius:3px;overflow:hidden}
+.alloc-bar-fill{height:100%;border-radius:3px;transition:width 0.5s ease}
+
+/* SAVE BAR */
+.save-bar{position:sticky;bottom:0;background:var(--bg2);border-top:1px solid var(--border);padding:14px 0;display:flex;align-items:center;justify-content:space-between;margin-top:20px}
+.save-hint{font-family:var(--mono);font-size:11px;color:var(--text3)}
+
+/* TARGET EDITOR */
+.target-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)}
+.target-row:last-child{border-bottom:none}
+.target-name{font-weight:600;font-size:13px;flex:1}
+.target-input-wrap{display:flex;align-items:center;gap:6px}
+.target-input{width:70px;text-align:center}
+.target-pct{font-family:var(--mono);font-size:12px;color:var(--text3)}
+.target-total{display:flex;justify-content:space-between;padding-top:12px;margin-top:4px;border-top:1px solid var(--border);font-family:var(--mono);font-size:12px}
+
+/* TOAST */
+.toast{position:fixed;bottom:24px;right:24px;background:var(--surface);border:1px solid var(--accent);border-radius:8px;padding:12px 16px;font-size:13px;font-weight:600;z-index:2000;animation:slideUp 0.3s ease}
+@keyframes slideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+
+/* LOADING */
+.loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--text3);font-family:var(--mono);font-size:12px;gap:10px}
+.spinner{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* MODAL */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);z-index:1000;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:26px;width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;position:relative}
+.modal::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--blue),var(--accent));border-radius:14px 14px 0 0}
+.modal-title{font-weight:800;font-size:17px;margin-bottom:18px}
+.modal-close{position:absolute;top:14px;right:14px;background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer}
+.modal-close:hover{color:var(--text)}
+
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:var(--bg2)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+</style>
+</head>
+<body>
+<div id="app">
+<div class="wrap">
+
+  <div class="topbar">
+    <div>
+      <div class="page-title">⚙️ Portfolio Settings</div>
+      <div class="page-sub">// KELOLA ASET · EDIT DETAIL · PREVIEW P&L</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost" @click="loadPortfolio">⟳ Refresh</button>
+      <button class="btn btn-primary" @click="showPreview=true" :disabled="!hasChanges">
+        👁 Preview & Simpan
+      </button>
+    </div>
+  </div>
+
+  <!-- LOADING -->
+  <div class="loading" v-if="loading"><div class="spinner"></div> Memuat portfolio dari Firestore...</div>
+
+  <template v-if="!loading">
+
+    <!-- TABS -->
+    <div class="tabs">
+      <div class="tab" :class="{active:activeTab==='emas'}" @click="activeTab='emas'">🥇 Emas ({{portfolio.emas?.length||0}})</div>
+      <div class="tab" :class="{active:activeTab==='saham'}" @click="activeTab='saham'">📈 Saham ({{portfolio.saham?.length||0}})</div>
+      <div class="tab" :class="{active:activeTab==='reksa'}" @click="activeTab='reksa'">🏦 Reksa Dana ({{portfolio.reksadana?.length||0}})</div>
+      <div class="tab" :class="{active:activeTab==='target'}" @click="activeTab='target'">⚖️ Target Alokasi</div>
+    </div>
+
+    <!-- ═══ TAB EMAS ═══ -->
+    <div v-if="activeTab==='emas'">
+      <div class="section-header">
+        <div class="section-title">Posisi Emas</div>
+        <button class="btn btn-blue btn-sm" @click="openAddForm('emas')">+ Tambah Emas</button>
+      </div>
+
+      <!-- ADD FORM EMAS -->
+      <div class="add-form" v-if="addForm.show && addForm.type==='emas'">
+        <div class="add-form-title">➕ {{addForm.editIndex>=0?'Edit':'Tambah'}} Posisi Emas</div>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label required">Nama</label>
+            <input class="form-input" v-model="addForm.data.nama" placeholder="Emas Antam">
+          </div>
+          <div class="form-group">
+            <label class="form-label required">ID (unik)</label>
+            <input class="form-input" v-model="addForm.data.id" placeholder="emas_antam">
+          </div>
+        </div>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label required">Qty (gram)</label>
+            <input class="form-input" type="number" v-model.number="addForm.data.qty_gram" placeholder="10">
+          </div>
+          <div class="form-group">
+            <label class="form-label required">Avg Beli (Rp/gram)</label>
+            <input class="form-input" type="number" v-model.number="addForm.data.avg_buy_price" placeholder="1050000">
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:12px">
+          <label class="form-label">Catatan</label>
+          <input class="form-input" v-model="addForm.data.catatan" placeholder="Logam mulia 24K">
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" @click="saveAddForm">💾 {{addForm.editIndex>=0?'Update':'Tambah'}}</button>
+          <button class="btn btn-ghost" @click="addForm.show=false">Batal</button>
+        </div>
+      </div>
+
+      <div v-if="!portfolio.emas?.length" class="card" style="text-align:center;padding:28px;color:var(--text3)">
+        Belum ada posisi emas. Klik "+ Tambah Emas".
+      </div>
+
+      <div class="asset-item" v-for="(item, idx) in portfolio.emas" :key="item.id">
+        <div class="asset-header">
+          <div>
+            <div class="asset-name">{{item.nama}}</div>
+            <div class="asset-sub">{{item.qty_gram}} gram · Avg Rp{{formatNum(item.avg_buy_price)}}/gram</div>
+          </div>
+          <div class="asset-actions">
+            <button class="btn btn-blue btn-sm" @click="editItem('emas', idx)">✏️ Edit</button>
+            <button class="btn btn-danger btn-sm" @click="deleteItem('emas', idx)">🗑</button>
+          </div>
+        </div>
+        <div class="asset-detail">
+          <div class="detail-item"><div class="detail-label">Qty</div><div class="detail-value">{{item.qty_gram}}g</div></div>
+          <div class="detail-item"><div class="detail-label">Avg Beli</div><div class="detail-value">Rp{{formatNum(item.avg_buy_price)}}</div></div>
+          <div class="detail-item"><div class="detail-label">Modal</div><div class="detail-value">Rp{{formatNum(item.qty_gram * item.avg_buy_price)}}</div></div>
+          <div class="detail-item"><div class="detail-label">Catatan</div><div class="detail-value" style="font-size:11px">{{item.catatan||'—'}}</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ TAB SAHAM ═══ -->
+    <div v-if="activeTab==='saham'">
+      <div class="section-header">
+        <div class="section-title">Posisi Saham</div>
+        <button class="btn btn-blue btn-sm" @click="openAddForm('saham')">+ Tambah Saham</button>
+      </div>
+
+      <!-- ADD FORM SAHAM -->
+      <div class="add-form" v-if="addForm.show && addForm.type==='saham'">
+        <div class="add-form-title">➕ {{addForm.editIndex>=0?'Edit':'Tambah'}} Posisi Saham</div>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label required">Kode Saham</label>
+            <input class="form-input" v-model="addForm.data.id" placeholder="BBCA" style="text-transform:uppercase">
+          </div>
+          <div class="form-group">
+            <label class="form-label required">Nama Perusahaan</label>
+            <input class="form-input" v-model="addForm.data.nama" placeholder="Bank Central Asia">
+          </div>
+        </div>
+        <div class="form-grid-3">
+          <div class="form-group">
+            <label class="form-label required">Qty (Lot)</label>
+            <input class="form-input" type="number" v-model.number="addForm.data.qty_lot" placeholder="50">
+          </div>
+          <div class="form-group">
+            <label class="form-label required">Avg Buy (Rp)</label>
+            <input class="form-input" type="number" v-model.number="addForm.data.avg_buy_price" placeholder="6100">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Ticker Yahoo</label>
+            <input class="form-input" v-model="addForm.data.ticker" placeholder="BBCA.JK">
+          </div>
+        </div>
+        <div class="form-grid-3">
+          <div class="form-group">
+            <label class="form-label">Support (Rp)</label>
+            <input class="form-input" type="number" v-model.number="addForm.data.support" placeholder="5800">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Resistance (Rp)</label>
+            <input class="form-input" type="number" v-model.number="addForm.data.resistance" placeholder="6500">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Stop Loss (Rp)</label>
+            <input class="form-input" type="number" v-model.number="addForm.data.stop_loss" placeholder="5500">
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:12px">
+          <label class="form-label">Catatan</label>
+          <input class="form-input" v-model="addForm.data.catatan" placeholder="Blue chip perbankan">
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" @click="saveAddForm">💾 {{addForm.editIndex>=0?'Update':'Tambah'}}</button>
+          <button class="btn btn-ghost" @click="addForm.show=false">Batal</button>
+        </div>
+      </div>
+
+      <div v-if="!portfolio.saham?.length" class="card" style="text-align:center;padding:28px;color:var(--text3)">
+        Belum ada posisi saham. Klik "+ Tambah Saham".
+      </div>
+
+      <div class="asset-item" v-for="(item, idx) in portfolio.saham" :key="item.id">
+        <div class="asset-header">
+          <div>
+            <div class="asset-name">{{item.id}} <span style="font-size:12px;color:var(--text3);font-weight:400">{{item.nama}}</span></div>
+            <div class="asset-sub">{{item.qty_lot}} lot · Avg Rp{{formatNum(item.avg_buy_price)}}</div>
+          </div>
+          <div class="asset-actions">
+            <button class="btn btn-blue btn-sm" @click="editItem('saham', idx)">✏️ Edit</button>
+            <button class="btn btn-danger btn-sm" @click="deleteItem('saham', idx)">🗑</button>
+          </div>
+        </div>
+        <div class="asset-detail">
+          <div class="detail-item"><div class="detail-label">Qty Lot</div><div class="detail-value">{{item.qty_lot}} lot</div></div>
+          <div class="detail-item"><div class="detail-label">Avg Buy</div><div class="detail-value">Rp{{formatNum(item.avg_buy_price)}}</div></div>
+          <div class="detail-item"><div class="detail-label">Support</div><div class="detail-value" style="color:var(--green)">Rp{{formatNum(item.support)||'—'}}</div></div>
+          <div class="detail-item"><div class="detail-label">Resistance</div><div class="detail-value" style="color:var(--red)">Rp{{formatNum(item.resistance)||'—'}}</div></div>
+          <div class="detail-item"><div class="detail-label">Stop Loss</div><div class="detail-value" style="color:var(--warn)">Rp{{formatNum(item.stop_loss)||'—'}}</div></div>
+          <div class="detail-item"><div class="detail-label">Modal</div><div class="detail-value">Rp{{formatNum(item.qty_lot*100*item.avg_buy_price)}}</div></div>
+          <div class="detail-item"><div class="detail-label">Ticker</div><div class="detail-value" style="font-size:11px">{{item.ticker||item.id+'.JK'}}</div></div>
+          <div class="detail-item"><div class="detail-label">Catatan</div><div class="detail-value" style="font-size:11px">{{item.catatan||'—'}}</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ TAB REKSA DANA ═══ -->
+    <div v-if="activeTab==='reksa'">
+      <div class="section-header">
+        <div class="section-title">Posisi Reksa Dana</div>
+        <button class="btn btn-blue btn-sm" @click="openAddForm('reksa')">+ Tambah Reksa Dana</button>
+      </div>
+
+      <!-- ADD FORM REKSA -->
+      <div class="add-form" v-if="addForm.show && addForm.type==='reksa'">
+        <div class="add-form-title">➕ {{addForm.editIndex>=0?'Edit':'Tambah'}} Reksa Dana</div>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label required">ID (unik)</label>
+            <input class="form-input" v-model="addForm.data.id" placeholder="SUCORINVEST_EQUITY">
+          </div>
+          <div class="form-group">
+            <label class="form-label required">Nama Produk</label>
+            <input class="form-input" v-model="addForm.data.nama" placeholder="Sucorinvest Equity Fund">
+          </div>
+        </div>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label required">Qty Unit</label>
+            <input class="form-input" type="number" v-model.number="addForm.data.qty_unit" placeholder="12450">
+          </div>
+          <div class="form-group">
+            <label class="form-label required">Avg NAB Beli (Rp)</label>
+            <input class="form-input" type="number" v-model.number="addForm.data.avg_buy_nab" placeholder="2340">
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:12px">
+          <label class="form-label">Catatan</label>
+          <input class="form-input" v-model="addForm.data.catatan" placeholder="Reksa dana saham">
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" @click="saveAddForm">💾 {{addForm.editIndex>=0?'Update':'Tambah'}}</button>
+          <button class="btn btn-ghost" @click="addForm.show=false">Batal</button>
+        </div>
+      </div>
+
+      <div v-if="!portfolio.reksadana?.length" class="card" style="text-align:center;padding:28px;color:var(--text3)">
+        Belum ada posisi reksa dana. Klik "+ Tambah Reksa Dana".
+      </div>
+
+      <div class="asset-item" v-for="(item, idx) in portfolio.reksadana" :key="item.id">
+        <div class="asset-header">
+          <div>
+            <div class="asset-name">{{item.nama}}</div>
+            <div class="asset-sub">{{formatNum(item.qty_unit)}} unit · Avg NAB Rp{{formatNum(item.avg_buy_nab)}}</div>
+          </div>
+          <div class="asset-actions">
+            <button class="btn btn-blue btn-sm" @click="editItem('reksa', idx)">✏️ Edit</button>
+            <button class="btn btn-danger btn-sm" @click="deleteItem('reksa', idx)">🗑</button>
+          </div>
+        </div>
+        <div class="asset-detail">
+          <div class="detail-item"><div class="detail-label">Qty Unit</div><div class="detail-value">{{formatNum(item.qty_unit)}}</div></div>
+          <div class="detail-item"><div class="detail-label">Avg NAB</div><div class="detail-value">Rp{{formatNum(item.avg_buy_nab)}}</div></div>
+          <div class="detail-item"><div class="detail-label">Modal</div><div class="detail-value">Rp{{formatNum(item.qty_unit*item.avg_buy_nab)}}</div></div>
+          <div class="detail-item"><div class="detail-label">Catatan</div><div class="detail-value" style="font-size:11px">{{item.catatan||'—'}}</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ TAB TARGET ALOKASI ═══ -->
+    <div v-if="activeTab==='target'">
+      <div class="section-header">
+        <div class="section-title">Target Alokasi Aset</div>
+        <span class="badge" :class="targetTotal===100?'badge-green':'badge-warn'">Total: {{targetTotal}}%</span>
+      </div>
+
+      <div class="card">
+        <div class="target-row" v-for="item in targetItems" :key="item.key">
+          <div class="asset-name">{{item.icon}} {{item.label}}</div>
+          <div class="target-input-wrap">
+            <input class="form-input target-input" type="number" min="0" max="100"
+              v-model.number="portfolio.target_allocation[item.key]"
+              @input="markChanged">
+            <span class="target-pct">%</span>
+          </div>
+        </div>
+        <div class="target-total">
+          <span style="color:var(--text3)">Total Alokasi</span>
+          <span :style="{color:targetTotal===100?'var(--green)':'var(--warn)',fontWeight:'700'}">{{targetTotal}}% {{targetTotal===100?'✓':'⚠️ Harus = 100%'}}</span>
+        </div>
+
+        <div class="alloc-section" style="margin-top:14px">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:2px;margin-bottom:10px">PREVIEW ALOKASI TARGET</div>
+          <div class="alloc-row" v-for="item in targetItems" :key="item.key">
+            <div class="alloc-label-row">
+              <span>{{item.icon}} {{item.label}}</span>
+              <span>{{portfolio.target_allocation[item.key]}}%</span>
+            </div>
+            <div class="alloc-bar-bg">
+              <div class="alloc-bar-fill" :style="{width:portfolio.target_allocation[item.key]+'%',background:item.color}"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SAVE BAR -->
+    <div class="save-bar" v-if="hasChanges">
+      <div class="save-hint">⚠️ Ada perubahan yang belum disimpan</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" @click="resetChanges">↩ Reset</button>
+        <button class="btn btn-primary" @click="showPreview=true">👁 Preview & Simpan →</button>
+      </div>
+    </div>
+
+  </template>
+</div>
+
+<!-- ═══ MODAL PREVIEW ═══ -->
+<div class="modal-overlay" :class="{open:showPreview}" @click.self="showPreview=false">
+  <div class="modal">
+    <button class="modal-close" @click="showPreview=false">×</button>
+    <div class="modal-title">👁 Preview Perubahan P&L</div>
+
+    <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:14px">
+      Perubahan portfolio akan mempengaruhi kalkulasi berikut:
+    </div>
+
+    <!-- RINGKASAN PERUBAHAN -->
+    <div style="background:var(--bg);border-radius:8px;padding:14px;margin-bottom:14px">
+      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:2px;margin-bottom:10px">RINGKASAN PERUBAHAN</div>
+      <div v-if="changes.length===0" style="color:var(--text3);font-size:13px;text-align:center;padding:10px">Tidak ada perubahan terdeteksi</div>
+      <div v-for="c in changes" :key="c.desc" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
+        <span>{{c.icon}}</span>
+        <span>{{c.desc}}</span>
+        <span class="badge" :class="c.type==='add'?'badge-green':c.type==='edit'?'badge-warn':'badge-red'" style="margin-left:auto">{{c.type.toUpperCase()}}</span>
+      </div>
+    </div>
+
+    <!-- PREVIEW P&L -->
+    <div class="preview-box">
+      <div class="preview-title">ESTIMASI P&L SETELAH PERUBAHAN</div>
+      <div class="preview-grid">
+        <div class="preview-item">
+          <div class="preview-label">Total Modal Baru</div>
+          <div class="preview-val">Rp{{formatJuta(previewCalc.total_modal)}}Jt</div>
+        </div>
+        <div class="preview-item">
+          <div class="preview-label">Jumlah Aset</div>
+          <div class="preview-val">{{previewCalc.total_assets}} aset</div>
+        </div>
+      </div>
+      <div class="preview-compare" style="margin-top:12px">
+        <div>
+          <div class="preview-label" style="font-family:var(--mono);font-size:9px;color:var(--text3)">SEBELUM</div>
+          <div class="preview-before">Rp{{formatJuta(originalCalc.total_modal)}}Jt modal</div>
+          <div class="preview-before">{{originalCalc.total_assets}} aset</div>
+        </div>
+        <div class="preview-arrow">→</div>
+        <div>
+          <div class="preview-label" style="font-family:var(--mono);font-size:9px;color:var(--text3)">SESUDAH</div>
+          <div class="preview-after">Rp{{formatJuta(previewCalc.total_modal)}}Jt modal</div>
+          <div class="preview-after">{{previewCalc.total_assets}} aset</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:18px">
+      <button class="btn btn-primary" style="flex:1" @click="confirmSave" :disabled="saving">
+        {{saving?'⏳ Menyimpan...':'✅ Konfirmasi & Simpan ke Firestore'}}
+      </button>
+      <button class="btn btn-ghost" @click="showPreview=false">Batal</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL DELETE CONFIRM -->
+<div class="modal-overlay" :class="{open:deleteConfirm.show}" @click.self="deleteConfirm.show=false">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-title" style="color:var(--red)">🗑 Hapus Aset?</div>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:18px;line-height:1.6">
+      Yakin ingin menghapus <strong style="color:var(--text)">{{deleteConfirm.name}}</strong>?<br>
+      Data ini akan dihapus dari portfolio setelah disimpan.
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-danger" style="flex:1" @click="confirmDelete">Ya, Hapus</button>
+      <button class="btn btn-ghost" @click="deleteConfirm.show=false">Batal</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" v-if="toast.show">{{toast.msg}}</div>
+
+</div>
+
+<script>
+firebase.initializeApp({
+  apiKey: "AIzaSyA0mabuoirwuoOEfIQcbPzcztte0LGJxYQ",
+  authDomain: "omni-invest-sentinel-19f55.firebaseapp.com",
+  projectId: "omni-invest-sentinel-19f55",
+  storageBucket: "omni-invest-sentinel-19f55.firebasestorage.app",
+  messagingSenderId: "937459500646",
+  appId: "1:937459500646:web:642cf2f3743984ab9ccfa7"
+});
+
+const db = firebase.firestore();
+db.settings({
+  experimentalForceLongPolling: true,
+  experimentalAutoDetectLongPolling: false,
+  merge: true,
+  ignoreUndefinedProperties: true
+});
+
+const { createApp, ref, computed, onMounted } = Vue;
+
+createApp({
+  setup() {
+    const loading     = ref(true);
+    const saving      = ref(false);
+    const activeTab   = ref('saham');
+    const hasChanges  = ref(false);
+    const showPreview = ref(false);
+    const toast       = ref({show:false, msg:''});
+    const changes     = ref([]);
+
+    const portfolio = ref({
+      emas: [], saham: [], reksadana: [],
+      target_allocation: { emas:25, saham:50, reksadana:25 }
+    });
+
+    const originalPortfolio = ref(null);
+
+    const addForm = ref({
+      show: false, type: '', editIndex: -1,
+      data: {}
+    });
+
+    const deleteConfirm = ref({ show:false, type:'', index:-1, name:'' });
+
+    const targetItems = [
+      { key:'emas',      icon:'🥇', label:'Emas',      color:'linear-gradient(90deg,#ffd93d,#ff9f43)' },
+      { key:'saham',     icon:'📈', label:'Saham',     color:'linear-gradient(90deg,#0084ff,#00e5a0)' },
+      { key:'reksadana', icon:'🏦', label:'Reksadana', color:'linear-gradient(90deg,#a29bfe,#6c5ce7)' },
+    ];
+
+    const targetTotal = computed(() =>
+      (portfolio.value.target_allocation?.emas||0) +
+      (portfolio.value.target_allocation?.saham||0) +
+      (portfolio.value.target_allocation?.reksadana||0)
+    );
+
+    const originalCalc = computed(() => {
+      const p = originalPortfolio.value;
+      if (!p) return { total_modal:0, total_assets:0 };
+      let modal = 0;
+      p.emas?.forEach(i => modal += i.qty_gram * i.avg_buy_price);
+      p.saham?.forEach(i => modal += i.qty_lot * 100 * i.avg_buy_price);
+      p.reksadana?.forEach(i => modal += i.qty_unit * i.avg_buy_nab);
+      return { total_modal: modal, total_assets: (p.emas?.length||0)+(p.saham?.length||0)+(p.reksadana?.length||0) };
+    });
+
+    const previewCalc = computed(() => {
+      const p = portfolio.value;
+      let modal = 0;
+      p.emas?.forEach(i => modal += i.qty_gram * i.avg_buy_price);
+      p.saham?.forEach(i => modal += i.qty_lot * 100 * i.avg_buy_price);
+      p.reksadana?.forEach(i => modal += i.qty_unit * i.avg_buy_nab);
+      return { total_modal: modal, total_assets: (p.emas?.length||0)+(p.saham?.length||0)+(p.reksadana?.length||0) };
+    });
+
+    const formatNum = (n) => n ? Math.round(n).toLocaleString('id-ID') : '0';
+    const formatJuta = (n) => n ? (n/1000000).toFixed(1) : '0';
+
+    const showToast = (msg) => {
+      toast.value = {show:true, msg};
+      setTimeout(()=>toast.value.show=false, 3000);
+    };
+
+    const markChanged = () => { hasChanges.value = true; buildChanges(); };
+
+    const buildChanges = () => {
+      const c = [];
+      const orig = originalPortfolio.value;
+      if (!orig) return;
+      const newLen = (portfolio.value.emas?.length||0) + (portfolio.value.saham?.length||0) + (portfolio.value.reksadana?.length||0);
+      const origLen = (orig.emas?.length||0) + (orig.saham?.length||0) + (orig.reksadana?.length||0);
+      if (newLen > origLen) c.push({icon:'➕', desc:`Tambah ${newLen-origLen} aset baru`, type:'add'});
+      if (newLen < origLen) c.push({icon:'🗑', desc:`Hapus ${origLen-newLen} aset`, type:'delete'});
+      if (newLen === origLen && newLen > 0) c.push({icon:'✏️', desc:'Update detail aset', type:'edit'});
+      const tOrig = orig.target_allocation;
+      const tNew = portfolio.value.target_allocation;
+      if (JSON.stringify(tOrig) !== JSON.stringify(tNew)) c.push({icon:'⚖️', desc:'Update target alokasi', type:'edit'});
+      changes.value = c;
+    };
+
+    const loadPortfolio = async () => {
+      loading.value = true;
+      try {
+        const doc = await db.collection('portfolio').doc('main').get();
+        if (doc.exists) {
+          portfolio.value = doc.data();
+          originalPortfolio.value = JSON.parse(JSON.stringify(doc.data()));
+          showToast('✅ Portfolio dimuat');
+        } else {
+          showToast('⚠️ Portfolio belum ada di Firestore');
+        }
+      } catch(e) {
+        showToast('❌ Gagal load: ' + e.message);
+      } finally {
+        loading.value = false;
+      }
+    };
+
+    const openAddForm = (type) => {
+      addForm.value = { show:true, type, editIndex:-1, data: getEmptyForm(type) };
+    };
+
+    const editItem = (type, idx) => {
+      const map = { emas:'emas', saham:'saham', reksa:'reksadana' };
+      const key = map[type] || type;
+      const item = JSON.parse(JSON.stringify(portfolio.value[key][idx]));
+      addForm.value = { show:true, type, editIndex:idx, data:item };
+      activeTab.value = type === 'reksa' ? 'reksa' : type;
+    };
+
+    const getEmptyForm = (type) => {
+      if (type==='emas') return { id:'', nama:'', qty_gram:0, avg_buy_price:0, catatan:'' };
+      if (type==='saham') return { id:'', nama:'', ticker:'', qty_lot:0, avg_buy_price:0, support:0, resistance:0, stop_loss:0, catatan:'' };
+      if (type==='reksa') return { id:'', nama:'', qty_unit:0, avg_buy_nab:0, catatan:'' };
+    };
+
+    const saveAddForm = () => {
+      const f = addForm.value;
+      if (!f.data.id || !f.data.nama) { showToast('⚠️ ID dan Nama wajib diisi'); return; }
+      const map = { emas:'emas', saham:'saham', reksa:'reksadana' };
+      const key = map[f.type] || f.type;
+
+      // Auto set ticker untuk saham
+      if (f.type==='saham' && !f.data.ticker) f.data.ticker = f.data.id + '.JK';
+      if (f.type==='saham') f.data.id = f.data.id.toUpperCase();
+
+      if (f.editIndex >= 0) {
+        portfolio.value[key][f.editIndex] = { ...f.data };
+      } else {
+        if (!portfolio.value[key]) portfolio.value[key] = [];
+        portfolio.value[key].push({ ...f.data });
+      }
+      addForm.value.show = false;
+      markChanged();
+      showToast(f.editIndex>=0 ? '✏️ Aset diupdate' : '➕ Aset ditambahkan');
+    };
+
+    const deleteItem = (type, idx) => {
+      const map = { emas:'emas', saham:'saham', reksa:'reksadana' };
+      const key = map[type] || type;
+      const item = portfolio.value[key][idx];
+      deleteConfirm.value = { show:true, type:key, index:idx, name:item.nama||item.id };
+    };
+
+    const confirmDelete = () => {
+      const { type, index } = deleteConfirm.value;
+      portfolio.value[type].splice(index, 1);
+      deleteConfirm.value.show = false;
+      markChanged();
+      showToast('🗑 Aset dihapus (belum disimpan)');
+    };
+
+    const resetChanges = async () => {
+      await loadPortfolio();
+      hasChanges.value = false;
+      changes.value = [];
+      showToast('↩ Perubahan direset');
+    };
+
+    const confirmSave = async () => {
+      saving.value = true;
+      try {
+        portfolio.value.last_updated = new Date().toISOString().slice(0,10);
+        await db.collection('portfolio').doc('main').set(portfolio.value);
+        originalPortfolio.value = JSON.parse(JSON.stringify(portfolio.value));
+        hasChanges.value = false;
+        changes.value = [];
+        showPreview.value = false;
+        showToast('✅ Portfolio berhasil disimpan ke Firestore!');
+      } catch(e) {
+        showToast('❌ Gagal simpan: ' + e.message);
+      } finally {
+        saving.value = false;
+      }
+    };
+
+    onMounted(loadPortfolio);
+
+    return {
+      loading, saving, activeTab, hasChanges, showPreview,
+      portfolio, addForm, deleteConfirm, targetItems, targetTotal,
+      originalCalc, previewCalc, changes, toast,
+      formatNum, formatJuta, markChanged,
+      loadPortfolio, openAddForm, editItem, saveAddForm,
+      deleteItem, confirmDelete, resetChanges, confirmSave
+    };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>

@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Omni-Invest — FCM Setup</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0a0c10;
+    color: #e8edf5;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    background: #1a2133;
+    border: 1px solid #232d42;
+    border-radius: 16px;
+    padding: 32px;
+    width: 100%;
+    max-width: 480px;
+  }
+  .logo { font-size: 13px; color: #00e5a0; letter-spacing: 3px; margin-bottom: 8px; }
+  h1 { font-size: 22px; font-weight: 800; margin-bottom: 6px; }
+  .sub { font-size: 13px; color: #8899bb; margin-bottom: 28px; }
+  .step {
+    background: #0f1219;
+    border: 1px solid #232d42;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  .step-num {
+    display: inline-block;
+    width: 24px; height: 24px;
+    background: #00e5a0;
+    color: #000;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 24px;
+    font-size: 12px;
+    font-weight: 700;
+    margin-right: 8px;
+  }
+  .step-title { font-weight: 700; font-size: 14px; display: inline; }
+  .step-desc { font-size: 12px; color: #8899bb; margin-top: 8px; line-height: 1.5; }
+  .btn {
+    display: block;
+    width: 100%;
+    padding: 14px;
+    background: #00e5a0;
+    color: #000;
+    border: none;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 20px;
+    transition: all 0.2s;
+  }
+  .btn:hover { background: #00ffb3; transform: translateY(-1px); }
+  .btn:disabled { background: #232d42; color: #4a5878; cursor: not-allowed; transform: none; }
+  .token-box {
+    display: none;
+    margin-top: 20px;
+    background: #0a0c10;
+    border: 1px solid #00e5a0;
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .token-label {
+    font-size: 10px;
+    color: #00e5a0;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    font-family: monospace;
+  }
+  .token-value {
+    font-family: monospace;
+    font-size: 11px;
+    color: #e8edf5;
+    word-break: break-all;
+    line-height: 1.6;
+    background: #0f1219;
+    padding: 10px;
+    border-radius: 6px;
+    margin-bottom: 10px;
+  }
+  .copy-btn {
+    padding: 8px 16px;
+    background: transparent;
+    border: 1px solid #00e5a0;
+    color: #00e5a0;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .copy-btn:hover { background: rgba(0,229,160,0.1); }
+  .status {
+    font-size: 12px;
+    color: #8899bb;
+    margin-top: 14px;
+    font-family: monospace;
+    min-height: 20px;
+  }
+  .status.ok { color: #00e5a0; }
+  .status.err { color: #ff4757; }
+  .notif-test {
+    display: none;
+    margin-top: 14px;
+  }
+  .notif-btn {
+    display: block;
+    width: 100%;
+    padding: 12px;
+    background: #0084ff;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .notif-btn:hover { background: #339dff; }
+  .instruction {
+    background: rgba(0,132,255,0.08);
+    border: 1px solid rgba(0,132,255,0.2);
+    border-radius: 8px;
+    padding: 14px;
+    margin-top: 14px;
+    font-size: 12px;
+    color: #8899bb;
+    line-height: 1.6;
+    display: none;
+  }
+  .instruction strong { color: #e8edf5; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">// OMNI-INVEST SENTINEL</div>
+  <h1>FCM Token Setup 📲</h1>
+  <p class="sub">Generate device token untuk push notifikasi ke HP ini</p>
+
+  <div class="step">
+    <span class="step-num">1</span>
+    <span class="step-title">Izinkan Notifikasi</span>
+    <div class="step-desc">Browser akan meminta izin notifikasi. Klik <strong>"Allow"</strong> / <strong>"Izinkan"</strong> saat muncul popup.</div>
+  </div>
+
+  <div class="step">
+    <span class="step-num">2</span>
+    <span class="step-title">Copy Token</span>
+    <div class="step-desc">Setelah token muncul, copy dan paste ke file <code style="color:#00e5a0">config/.env</code> di STB kamu.</div>
+  </div>
+
+  <div class="step">
+    <span class="step-num">3</span>
+    <span class="step-title">Test Notifikasi</span>
+    <div class="step-desc">Klik tombol test untuk verifikasi notifikasi berjalan dari STB ke HP.</div>
+  </div>
+
+  <button class="btn" id="getTokenBtn" onclick="getToken()">
+    🔑 Generate FCM Token
+  </button>
+
+  <div class="token-box" id="tokenBox">
+    <div class="token-label">Device Token (FCM)</div>
+    <div class="token-value" id="tokenValue">—</div>
+    <button class="copy-btn" onclick="copyToken()">📋 Copy Token</button>
+  </div>
+
+  <div class="notif-test" id="notifTest">
+    <button class="notif-btn" onclick="testNotif()">
+      🔔 Test Notifikasi Lokal
+    </button>
+  </div>
+
+  <div class="instruction" id="instruction">
+    <strong>Langkah selanjutnya di STB:</strong><br><br>
+    1. Buka terminal SSH ke STB<br>
+    2. Jalankan perintah:<br>
+    <code style="color:#00e5a0;font-size:11px">nano /home/sidrive/omni-invest/config/.env</code><br><br>
+    3. Tambahkan baris ini di bagian bawah:<br>
+    <code style="color:#00e5a0;font-size:11px" id="envLine">FCM_DEVICE_TOKEN=...</code><br><br>
+    4. Simpan dengan <strong>Ctrl+X → Y → Enter</strong>
+  </div>
+
+  <div class="status" id="status">Siap — klik tombol untuk mulai</div>
+</div>
+
+<!-- Firebase SDKs -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyA0mabuoirwuoOEfIQcbPzcztte0LGJxYQ",
+    authDomain: "omni-invest-sentinel-19f55.firebaseapp.com",
+    projectId: "omni-invest-sentinel-19f55",
+    storageBucket: "omni-invest-sentinel-19f55.firebasestorage.app",
+    messagingSenderId: "937459500646",
+    appId: "1:937459500646:web:642cf2f3743984ab9ccfa7"
+  };
+
+  const VAPID_KEY = "BGQVQsJbZQ6PAqRi81m0XAy1ejnle8EhMLihBLQ7kJp0HtoqIjotm0J26tiEtUQH7cc9Ea2xP3iZQ5YgiVcV_1Y";
+
+  const app = initializeApp(firebaseConfig);
+  const messaging = getMessaging(app);
+
+  // Expose ke window supaya bisa dipanggil dari onclick
+  window.getToken = async function() {
+    const btn = document.getElementById("getTokenBtn");
+    const status = document.getElementById("status");
+
+    btn.disabled = true;
+    btn.textContent = "⏳ Meminta izin notifikasi...";
+    status.className = "status";
+    status.textContent = "Menunggu izin notifikasi dari browser...";
+
+    try {
+      // Minta izin notifikasi
+      const permission = await Notification.requestPermission();
+
+      if (permission !== "granted") {
+        throw new Error("Izin notifikasi ditolak. Klik ikon 🔒 di address bar dan izinkan notifikasi.");
+      }
+
+      status.textContent = "✅ Izin diberikan. Generating token...";
+      btn.textContent = "⏳ Generating token...";
+
+      // Register service worker dulu
+      let swReg = null;
+      if ('serviceWorker' in navigator) {
+        try {
+          swReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+        } catch(e) {
+          // SW tidak wajib untuk getToken di beberapa browser
+        }
+      }
+
+      // Get FCM Token
+      const token = await getToken(messaging, {
+        vapidKey: VAPID_KEY,
+        ...(swReg ? { serviceWorkerRegistration: swReg } : {})
+      });
+
+      if (!token) throw new Error("Token tidak berhasil di-generate. Coba refresh halaman.");
+
+      // Tampilkan token
+      document.getElementById("tokenValue").textContent = token;
+      document.getElementById("tokenBox").style.display = "block";
+      document.getElementById("notifTest").style.display = "block";
+      document.getElementById("instruction").style.display = "block";
+      document.getElementById("envLine").textContent = `FCM_DEVICE_TOKEN=${token}`;
+
+      btn.textContent = "✅ Token Berhasil Di-generate!";
+      btn.style.background = "#232d42";
+      btn.style.color = "#00e5a0";
+
+      status.className = "status ok";
+      status.textContent = "✅ Token siap! Copy dan paste ke config/.env di STB.";
+
+      // Listen pesan masuk
+      onMessage(messaging, (payload) => {
+        const { title, body } = payload.notification || {};
+        status.textContent = `📬 Pesan masuk: ${title} — ${body}`;
+        new Notification(title || "Omni-Invest", { body: body || "" });
+      });
+
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = "🔑 Coba Lagi";
+      status.className = "status err";
+      status.textContent = "❌ " + err.message;
+      console.error(err);
+    }
+  };
+
+  window.copyToken = function() {
+    const token = document.getElementById("tokenValue").textContent;
+    navigator.clipboard.writeText(token).then(() => {
+      const btn = document.querySelector(".copy-btn");
+      btn.textContent = "✅ Tersalin!";
+      setTimeout(() => btn.textContent = "📋 Copy Token", 2000);
+    });
+  };
+
+  window.testNotif = function() {
+    if (Notification.permission === "granted") {
+      new Notification("🔔 Omni-Invest Sentinel", {
+        body: "✅ Notifikasi berjalan! STB siap kirim alert ke HP ini.",
+        icon: "https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+      });
+      document.getElementById("status").className = "status ok";
+      document.getElementById("status").textContent = "✅ Test notifikasi berhasil!";
+    }
+  };
+</script>
+</body>
+</html>

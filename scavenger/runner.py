@@ -1,0 +1,152 @@
+"""
+THE SCAVENGER — Main Runner
+Menggabungkan semua fetcher dan simpan ke Firestore
+"""
+import sys
+import os
+import json
+import logging
+from datetime import datetime
+from pathlib import Path
+
+# Load .env
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent / "config" / ".env")
+
+# Firebase
+import firebase_admin
+from firebase_admin import credentials, firestore
+
+# Local fetchers
+sys.path.insert(0, str(Path(__file__).parent))
+from gold_fetcher import fetch_gold_price
+from stock_fetcher import fetch_stock_prices
+from reksa_fetcher import fetch_all_reksa, format_for_firestore
+from valas_fetcher import fetch_valas_rates
+
+# Setup logging
+log_dir = Path(os.getenv("LOG_DIR", "~/omni-invest/logs")).expanduser()
+log_dir.mkdir(parents=True, exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [RUNNER] %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(log_dir / "scavenger.log")
+    ]
+)
+log = logging.getLogger(__name__)
+
+# Init Firebase (hanya sekali)
+def init_firebase():
+    if not firebase_admin._apps:
+        key_path = os.getenv("FIREBASE_KEY_PATH")
+        cred = credentials.Certificate(key_path)
+        firebase_admin.initialize_app(cred)
+    return firestore.client()
+
+def save_to_firestore(db, collection: str, doc_id: str, data: dict):
+    """Simpan data ke Firestore dengan retry"""
+    import time
+    for attempt in range(3):
+        try:
+            db.collection(collection).document(doc_id).set(data)
+            log.info(f"✅ Firestore saved: {collection}/{doc_id}")
+            return
+        except Exception as e:
+            if attempt < 2:
+                log.warning(f"⚠️ Firestore retry {attempt+1}/3: {e}")
+                time.sleep(3)
+            else:
+                log.error(f"❌ Firestore gagal setelah 3x: {e}")
+
+def save_to_local(data: dict, filename: str):
+    """Backup simpan ke file lokal JSON"""
+    data_dir = Path(os.getenv("DATA_DIR", "~/omni-invest/data")).expanduser()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    filepath = data_dir / filename
+    with open(filepath, "w") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    log.info(f"💾 Local saved: {filepath}")
+
+def run_scavenger():
+    log.info("=" * 50)
+    log.info("🔍 SCAVENGER STARTED")
+    log.info(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S WIB')}")
+    log.info("=" * 50)
+
+    # 1. Fetch semua data
+    log.info("📡 Fetching semua sumber data...")
+    gold_data   = fetch_gold_price()
+    stock_data  = fetch_stock_prices()
+    valas_data  = fetch_valas_rates()
+    
+    try:
+        db_temp = init_firebase()
+        last_doc = db_temp.collection("market_data").document("latest").get().to_dict()
+        last_reksa_cache = last_doc.get("reksadana", {}).get("reksa_dana", {}) if last_doc else {}
+    except Exception:
+        last_reksa_cache = {}
+
+    reksa_result = fetch_all_reksa(last_data=last_reksa_cache)
+    reksa_data   = {"reksa_dana": format_for_firestore(reksa_result), "summary": reksa_result["summary"]}
+
+    # 2. Gabungkan ke satu payload
+    timestamp = datetime.now().isoformat()
+    payload = {
+        "fetched_at": timestamp,
+        "emas": gold_data,
+        "saham": stock_data,
+        "reksadana": reksa_data,
+      	"valas":      valas_data, 
+    }
+
+    # 3. Simpan ke lokal (selalu)
+    date_str = datetime.now().strftime("%Y%m%d_%H%M")
+    save_to_local(payload, f"market_{date_str}.json")
+    save_to_local(payload, "market_latest.json")  # overwrite latest
+
+    # 4. Simpan ke Firestore
+    try:
+        log.info("☁️  Mengirim ke Firestore...")
+        db = init_firebase()
+
+        # Simpan snapshot harga terbaru
+        save_to_firestore(db, "market_data", "latest", payload)
+
+        # Simpan history harian
+        date_doc = datetime.now().strftime("%Y-%m-%d")
+        save_to_firestore(db, "market_history", date_doc, payload)
+
+        log.info("✅ Firestore sync selesai")
+
+    except Exception as e:
+        log.error(f"❌ Firestore gagal (data tetap tersimpan lokal): {e}")
+
+    log.info("=" * 50)
+    log.info("✅ SCAVENGER SELESAI")
+    log.info("=" * 50)
+
+    return payload
+
+if __name__ == "__main__":
+    result = run_scavenger()
+    print("\n📊 SUMMARY:")
+    print(f"  🥇 Emas  : Rp{result['emas'].get('antam_per_gram', 'N/A'):,}")
+    stocks = result['saham'].get('stocks', {})
+    for code, data in stocks.items():
+        price = data.get('price')
+        pct = data.get('change_pct', 0)
+        arrow = '▲' if pct >= 0 else '▼'
+        print(f"  📈 {code:<6}: Rp{price:,} {arrow}{pct}%")
+    reksa_summary = result['reksadana'].get('summary', {})
+    print(f"  🏦 Reksa : {reksa_summary.get('ok', 0)}/{reksa_summary.get('total', 0)} berhasil fetch NAB")
+    valas_rates = result['valas'].get('rates', {})
+    for code, data in valas_rates.items():
+        if data.get('status') == 'ok':
+            pct = data.get('change_pct', 0)
+            arrow = '▲' if pct >= 0 else '▼'
+            print(f"  💱 {code:<6}: Rp{data['rate']:>10,.2f} {arrow}{pct:+.2f}%")
+        else:
+            print(f"  💱 {code:<6}: ERROR — {data.get('error_msg', 'unknown')}")
