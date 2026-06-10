@@ -33,8 +33,24 @@ class Analyst:
         self.report     = {}
 
     def _load_portfolio(self) -> dict:
-        """Load portfolio dari Firestore (prioritas) atau file lokal (fallback)"""
+        """
+        Load portfolio — local JSON primary, Firestore fallback.
+        Local JSON adalah source of truth (konsisten dengan serve_setup.py).
+        """
         cache_path = Path(__file__).parent.parent / "config" / "portfolio.json"
+
+        # ── PRIMARY: baca dari local JSON ──
+        if cache_path.exists():
+            try:
+                with open(cache_path) as f:
+                    data = json.load(f)
+                log.info("✅ Portfolio loaded dari local JSON")
+                return data
+            except Exception as e:
+                log.warning(f"⚠️ Gagal baca portfolio.json: {e}")
+
+        # ── FALLBACK: baca dari Firestore jika local tidak ada ──
+        log.warning("⚠️ portfolio.json tidak ada, mencoba Firestore...")
         try:
             import firebase_admin
             from firebase_admin import credentials, firestore as fs
@@ -46,23 +62,21 @@ class Analyst:
             doc = db.collection("portfolio").document("main").get()
             if doc.exists:
                 data = doc.to_dict()
-                log.info("✅ Portfolio loaded dari Firestore")
+                log.info("✅ Portfolio loaded dari Firestore (fallback)")
                 try:
                     with open(cache_path, "w") as f:
                         json.dump(data, f, indent=2, ensure_ascii=False)
+                    log.info("💾 Portfolio cached ke local JSON")
                 except Exception as cache_err:
-                    log.warning(f"⚠️ Gagal tulis cache portfolio.json: {cache_err}")
+                    log.warning(f"⚠️ Gagal tulis cache: {cache_err}")
                 return data
             raise ValueError("Portfolio tidak ada di Firestore")
         except Exception as e:
-            log.warning(f"⚠️ Firestore fallback ke file lokal: {e}")
-            if not cache_path.exists():
-                raise Exception(
-                    "Portfolio tidak tersedia. Jalankan pipeline "
-                    "saat koneksi Firestore aktif untuk membuat cache lokal."
-                )
-            with open(cache_path) as f:
-                return json.load(f)
+            raise Exception(
+                f"Portfolio tidak tersedia. "
+                f"Pastikan portfolio.json ada di config/ atau koneksi Firestore aktif. "
+                f"Error: {e}"
+            )
 
     def _load_market(self) -> dict:
         path = Path(os.getenv("DATA_DIR", "~/omni-invest/data")).expanduser()
