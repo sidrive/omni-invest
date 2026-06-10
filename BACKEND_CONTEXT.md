@@ -384,7 +384,7 @@ python3 main.py
 
 # Test import modul
 python3 -c "from scavenger.reksa_fetcher import fetch_all_reksa; print('OK')"
-python3 -c "from analyst.engine import Analyst; print('OK')"
+python3 -c "from analyst.engine import Analyst; print('✅ engine OK')"
 python3 -c "from scavenger.runner import run_scavenger; print('OK')"
 
 # Monitor log realtime
