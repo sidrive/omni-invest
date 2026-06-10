@@ -1,0 +1,11 @@
+{
+  "emas": [],
+  "saham": [],
+  "reksadana": [],
+  "valas": [],
+  "target_allocation": {
+    "emas": 30,
+    "saham": 50,
+    "reksa": 20
+  }
+}

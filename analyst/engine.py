@@ -34,6 +34,7 @@ class Analyst:
 
     def _load_portfolio(self) -> dict:
         """Load portfolio dari Firestore (prioritas) atau file lokal (fallback)"""
+        cache_path = Path(__file__).parent.parent / "config" / "portfolio.json"
         try:
             import firebase_admin
             from firebase_admin import credentials, firestore as fs
@@ -44,13 +45,23 @@ class Analyst:
             db = fs.client()
             doc = db.collection("portfolio").document("main").get()
             if doc.exists:
+                data = doc.to_dict()
                 log.info("✅ Portfolio loaded dari Firestore")
-                return doc.to_dict()
+                try:
+                    with open(cache_path, "w") as f:
+                        json.dump(data, f, indent=2, ensure_ascii=False)
+                except Exception as cache_err:
+                    log.warning(f"⚠️ Gagal tulis cache portfolio.json: {cache_err}")
+                return data
             raise ValueError("Portfolio tidak ada di Firestore")
         except Exception as e:
             log.warning(f"⚠️ Firestore fallback ke file lokal: {e}")
-            path = Path(__file__).parent.parent / "config" / "portfolio.json"
-            with open(path) as f:
+            if not cache_path.exists():
+                raise Exception(
+                    "Portfolio tidak tersedia. Jalankan pipeline "
+                    "saat koneksi Firestore aktif untuk membuat cache lokal."
+                )
+            with open(cache_path) as f:
                 return json.load(f)
 
     def _load_market(self) -> dict:

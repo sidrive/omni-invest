@@ -7,12 +7,16 @@ Endpoint yang bekerja (confirmed di STB Armbian):
   → NAB terbaru = data[-1] (elemen terakhir)
 
 Fallback: nilai NAB terakhir dari cache Firestore
+
+REKSA_MAPPING dibaca dari config/reksa_mapping.json — di-generate otomatis
+saat user menyimpan portfolio via POST /api/portfolio.
 """
 
 import json
 import time
 import logging
 import requests
+from pathlib import Path
 from datetime import datetime, date
 
 logger = logging.getLogger(__name__)
@@ -29,438 +33,19 @@ HEADERS = {
     "Origin": "https://bibit.id",
 }
 
+
 # =============================================================================
-# MAPPING REKSA DANA
-# Isi rd_code dari URL bibit.id/reksadana/<rd_code>/<slug>
+# LOAD REKSA MAPPING
 # =============================================================================
-REKSA_MAPPING = {
-    "BRI_INDEKS_SYARIAH": {
-        "rd_code": "RD562",
-        "slug": "bri-indeks-syariah",
-        "nama_display": "BRI Indeks Syariah",
-        "jenis": "unknown",
-    },
-    "BNP_PARIPAS_SYARIAH": {
-        "rd_code": "RD424",
-        "slug": "bnp-paripas-pesona-syariah",
-        "nama_display": "BNP Paripas Pesona Syariah",
-        "jenis": "unknown",
-    },
-    "BNI_AM_INDEX": {
-        "rd_code": "RD337",
-        "slug": "bni-am-indexs",
-        "nama_display": "BNI AM Indexs",
-        "jenis": "unknown",
-    },
-    "MANDIRI_INVESTA_SYARIAH": {
-        "rd_code": "RD860",
-        "slug": "mandiri-investa-dana-syariah-kelas-a",
-        "nama_display": "Mandiri Investa Dana Syariah Kelas A",
-        "jenis": "unknown",
-    },
-    "TRIMEGAH_DANA_SYARIAH": {
-        "rd_code": "RD3480",
-        "slug": "trimegah-dana-tetap-syariah-kelas-a",
-        "nama_display": "Trimegah Dana Tetap Syariah Kelas A",
-        "jenis": "unknown",
-    },
-    "BNI_AM_PENDAPATAN_TETAP_SYARIAH": {
-        "rd_code": "RD332",
-        "slug": "bni-am-pendapatan-tetap-syariah-ardhani",
-        "nama_display": "BNI-AM Pendapatan Tetap Syariah Ardhani",
-        "jenis": "unknown",
-    },
-    "MAJORIS_SUKUK_NEGARA": {
-        "rd_code": "RD838",
-        "slug": "majoris-sukuk-negara-indonesia",
-        "nama_display": "Majoris Sukuk Negara Indonesia",
-        "jenis": "unknown",
-    },
-    "BAHANA_MES_SYARIAH_G": {
-        "rd_code": "RD1721",
-        "slug": "bahana-mes-syariah-fund-kelas-g",
-        "nama_display": "Bahana MES Syariah Fund Kelas G",
-        "jenis": "unknown",
-    },
-    "MANULIFE_OBLIGASI_ID_II_A": {
-        "rd_code": "RD994",
-        "slug": "manulife-obligasi-negara-indonesia-ii-kelas-a",
-        "nama_display": "Manulife Obligasi Negara Indonesia II Kelas A",
-        "jenis": "unknown",
-    },
-    "BNP_PARIPAS_SUKUK_RK1": {
-        "rd_code": "RD6524",
-        "slug": "bnp-paripas-sukuk-negara-kelas-rk1",
-        "nama_display": "BNP Paripas Sukuk Negara Kelas RK1",
-        "jenis": "unknown",
-    },
-    "MAJORIS_PASAR_UANG_SYARIAH_ID": {
-        "rd_code": "RD832",
-        "slug": "majoris-pasar-uang-syariah-indonesia",
-        "nama_display": "Majoris Pasar Uang Syariah Indonesia",
-        "jenis": "unknown",
-    },
-    "BAHANA_LIKUID_SYARIAH": {
-        "rd_code": "RD3595",
-        "slug": "bahana-likuid-syariah-kelas-g",
-        "nama_display": "Bahana Likuid Syariah Kelas G",
-        "jenis": "unknown",
-    },
-    "TRIMEGAH_KAS_SYARIAH": {
-        "rd_code": "RD1775",
-        "slug": "trimegah-kas-syariah",
-        "nama_display": "Trimegah Kas Syariah",
-        "jenis": "unknown",
-    },
-    "SUCORINVEST_SHARIA_MONEY": {
-        "rd_code": "RD1669",
-        "slug": "sucorinvest-sharia-money-market-fund",
-        "nama_display": "Sucorinvest Sharia Money Market Fund",
-        "jenis": "unknown",
-    },
-    "BATAVIA_DANA_KAS_MAXIMA": {
-        "rd_code": "RD205",
-        "slug": "batavia-dana-kas-maxima",
-        "nama_display": "Batavia Dana Kas Maxima",
-        "jenis": "unknown",
-    },
-    "BNP_PARIPAS_SYARIAH": {
-        "rd_code": "RD424",
-        "slug": "bnp-paripas-pesona-syariah",
-        "nama_display": "BNP Paripas Pesona Syariah",
-        "jenis": "unknown",
-    },
-    "BNI_AM_INDEX": {
-        "rd_code": "RD337",
-        "slug": "bni-am-indexs",
-        "nama_display": "BNI AM Indexs",
-        "jenis": "unknown",
-    },
-    "MANDIRI_INVESTA_SYARIAH": {
-        "rd_code": "RD860",
-        "slug": "mandiri-investa-dana-syariah-kelas-a",
-        "nama_display": "Mandiri Investa Dana Syariah Kelas A",
-        "jenis": "unknown",
-    },
-    "TRIMEGAH_DANA_SYARIAH": {
-        "rd_code": "RD3480",
-        "slug": "trimegah-dana-tetap-syariah-kelas-a",
-        "nama_display": "Trimegah Dana Tetap Syariah Kelas A",
-        "jenis": "unknown",
-    },
-    "BNI_AM_PENDAPATAN_TETAP_SYARIAH": {
-        "rd_code": "RD332",
-        "slug": "bni-am-pendapatan-tetap-syariah-ardhani",
-        "nama_display": "BNI-AM Pendapatan Tetap Syariah Ardhani",
-        "jenis": "unknown",
-    },
-    "MAJORIS_SUKUK_NEGARA": {
-        "rd_code": "RD838",
-        "slug": "majoris-sukuk-negara-indonesia",
-        "nama_display": "Majoris Sukuk Negara Indonesia",
-        "jenis": "unknown",
-    },
-    "BAHANA_MES_SYARIAH_G": {
-        "rd_code": "RD1721",
-        "slug": "bahana-mes-syariah-fund-kelas-g",
-        "nama_display": "Bahana MES Syariah Fund Kelas G",
-        "jenis": "unknown",
-    },
-    "MANULIFE_OBLIGASI_ID_II_A": {
-        "rd_code": "RD994",
-        "slug": "manulife-obligasi-negara-indonesia-ii-kelas-a",
-        "nama_display": "Manulife Obligasi Negara Indonesia II Kelas A",
-        "jenis": "unknown",
-    },
-    "BNP_PARIPAS_SUKUK_RK1": {
-        "rd_code": "RD6524",
-        "slug": "bnp-paripas-sukuk-negara-kelas-rk1",
-        "nama_display": "BNP Paripas Sukuk Negara Kelas RK1",
-        "jenis": "unknown",
-    },
-    "MAJORIS_PASAR_UANG_SYARIAH_ID": {
-        "rd_code": "RD832",
-        "slug": "majoris-pasar-uang-syariah-indonesia",
-        "nama_display": "Majoris Pasar Uang Syariah Indonesia",
-        "jenis": "unknown",
-    },
-    "BAHANA_LIKUID_SYARIAH": {
-        "rd_code": "RD3595",
-        "slug": "bahana-likuid-syariah-kelas-g",
-        "nama_display": "Bahana Likuid Syariah Kelas G",
-        "jenis": "unknown",
-    },
-    "TRIMEGAH_KAS_SYARIAH": {
-        "rd_code": "RD1775",
-        "slug": "trimegah-kas-syariah",
-        "nama_display": "Trimegah Kas Syariah",
-        "jenis": "unknown",
-    },
-    "SUCORINVEST_SHARIA_MONEY": {
-        "rd_code": "RD1669",
-        "slug": "sucorinvest-sharia-money-market-fund",
-        "nama_display": "Sucorinvest Sharia Money Market Fund",
-        "jenis": "unknown",
-    },
-    "BATAVIA_DANA_KAS_MAXIMA": {
-        "rd_code": "RD205",
-        "slug": "batavia-dana-kas-maxima",
-        "nama_display": "Batavia Dana Kas Maxima",
-        "jenis": "unknown",
-    },
-    "BNP_PARIPAS_SYARIAH": {
-        "rd_code": "RD424",
-        "slug": "bnp-paripas-pesona-syariah",
-        "nama_display": "BNP Paripas Pesona Syariah",
-        "jenis": "unknown",
-    },
-    "BNI_AM_INDEX": {
-        "rd_code": "RD337",
-        "slug": "bni-am-indexs",
-        "nama_display": "BNI AM Indexs",
-        "jenis": "unknown",
-    },
-    "MANDIRI_INVESTA_SYARIAH": {
-        "rd_code": "RD860",
-        "slug": "mandiri-investa-dana-syariah-kelas-a",
-        "nama_display": "Mandiri Investa Dana Syariah Kelas A",
-        "jenis": "unknown",
-    },
-    "TRIMEGAH_DANA_SYARIAH": {
-        "rd_code": "RD3480",
-        "slug": "trimegah-dana-tetap-syariah-kelas-a",
-        "nama_display": "Trimegah Dana Tetap Syariah Kelas A",
-        "jenis": "unknown",
-    },
-    "BNI_AM_PENDAPATAN_TETAP_SYARIAH": {
-        "rd_code": "RD332",
-        "slug": "bni-am-pendapatan-tetap-syariah-ardhani",
-        "nama_display": "BNI-AM Pendapatan Tetap Syariah Ardhani",
-        "jenis": "unknown",
-    },
-    "MAJORIS_SUKUK_NEGARA": {
-        "rd_code": "RD838",
-        "slug": "majoris-sukuk-negara-indonesia",
-        "nama_display": "Majoris Sukuk Negara Indonesia",
-        "jenis": "unknown",
-    },
-    "BAHANA_MES_SYARIAH_G": {
-        "rd_code": "RD1721",
-        "slug": "bahana-mes-syariah-fund-kelas-g",
-        "nama_display": "Bahana MES Syariah Fund Kelas G",
-        "jenis": "unknown",
-    },
-    "MANULIFE_OBLIGASI_ID_II_A": {
-        "rd_code": "RD994",
-        "slug": "manulife-obligasi-negara-indonesia-ii-kelas-a",
-        "nama_display": "Manulife Obligasi Negara Indonesia II Kelas A",
-        "jenis": "unknown",
-    },
-    "BNP_PARIPAS_SUKUK_RK1": {
-        "rd_code": "RD6524",
-        "slug": "bnp-paripas-sukuk-negara-kelas-rk1",
-        "nama_display": "BNP Paripas Sukuk Negara Kelas RK1",
-        "jenis": "unknown",
-    },
-    "MAJORIS_PASAR_UANG_SYARIAH_ID": {
-        "rd_code": "RD832",
-        "slug": "majoris-pasar-uang-syariah-indonesia",
-        "nama_display": "Majoris Pasar Uang Syariah Indonesia",
-        "jenis": "unknown",
-    },
-    "BAHANA_LIKUID_SYARIAH": {
-        "rd_code": "RD3595",
-        "slug": "bahana-likuid-syariah-kelas-g",
-        "nama_display": "Bahana Likuid Syariah Kelas G",
-        "jenis": "unknown",
-    },
-    "TRIMEGAH_KAS_SYARIAH": {
-        "rd_code": "RD1775",
-        "slug": "trimegah-kas-syariah",
-        "nama_display": "Trimegah Kas Syariah",
-        "jenis": "unknown",
-    },
-    "SUCORINVEST_SHARIA_MONEY": {
-        "rd_code": "RD1669",
-        "slug": "sucorinvest-sharia-money-market-fund",
-        "nama_display": "Sucorinvest Sharia Money Market Fund",
-        "jenis": "unknown",
-    },
-    "BATAVIA_DANA_KAS_MAXIMA": {
-        "rd_code": "RD205",
-        "slug": "batavia-dana-kas-maxima",
-        "nama_display": "Batavia Dana Kas Maxima",
-        "jenis": "unknown",
-    },
-    "BNP_PARIPAS_SYARIAH": {
-        "rd_code": "RD424",
-        "slug": "bnp-paripas-pesona-syariah",
-        "nama_display": "BNP Paripas Pesona Syariah",
-        "jenis": "unknown",
-    },
-    "BNI_AM_INDEX": {
-        "rd_code": "RD337",
-        "slug": "bni-am-indexs",
-        "nama_display": "BNI AM Indexs",
-        "jenis": "unknown",
-    },
-    "MANDIRI_INVESTA_SYARIAH": {
-        "rd_code": "RD860",
-        "slug": "mandiri-investa-dana-syariah-kelas-a",
-        "nama_display": "Mandiri Investa Dana Syariah Kelas A",
-        "jenis": "unknown",
-    },
-    "TRIMEGAH_DANA_SYARIAH": {
-        "rd_code": "RD3480",
-        "slug": "trimegah-dana-tetap-syariah-kelas-a",
-        "nama_display": "Trimegah Dana Tetap Syariah Kelas A",
-        "jenis": "unknown",
-    },
-    "BNI_AM_PENDAPATAN_TETAP_SYARIAH": {
-        "rd_code": "RD332",
-        "slug": "bni-am-pendapatan-tetap-syariah-ardhani",
-        "nama_display": "BNI-AM Pendapatan Tetap Syariah Ardhani",
-        "jenis": "unknown",
-    },
-    "MAJORIS_SUKUK_NEGARA": {
-        "rd_code": "RD838",
-        "slug": "majoris-sukuk-negara-indonesia",
-        "nama_display": "Majoris Sukuk Negara Indonesia",
-        "jenis": "unknown",
-    },
-    "BAHANA_MES_SYARIAH_G": {
-        "rd_code": "RD1721",
-        "slug": "bahana-mes-syariah-fund-kelas-g",
-        "nama_display": "Bahana MES Syariah Fund Kelas G",
-        "jenis": "unknown",
-    },
-    "MANULIFE_OBLIGASI_ID_II_A": {
-        "rd_code": "RD994",
-        "slug": "manulife-obligasi-negara-indonesia-ii-kelas-a",
-        "nama_display": "Manulife Obligasi Negara Indonesia II Kelas A",
-        "jenis": "unknown",
-    },
-    "BNP_PARIPAS_SUKUK_RK1": {
-        "rd_code": "RD6524",
-        "slug": "bnp-paripas-sukuk-negara-kelas-rk1",
-        "nama_display": "BNP Paripas Sukuk Negara Kelas RK1",
-        "jenis": "unknown",
-    },
-    "MAJORIS_PASAR_UANG_SYARIAH_ID": {
-        "rd_code": "RD832",
-        "slug": "majoris-pasar-uang-syariah-indonesia",
-        "nama_display": "Majoris Pasar Uang Syariah Indonesia",
-        "jenis": "unknown",
-    },
-    "BAHANA_LIKUID_SYARIAH": {
-        "rd_code": "RD3595",
-        "slug": "bahana-likuid-syariah-kelas-g",
-        "nama_display": "Bahana Likuid Syariah Kelas G",
-        "jenis": "unknown",
-    },
-    "TRIMEGAH_KAS_SYARIAH": {
-        "rd_code": "RD1775",
-        "slug": "trimegah-kas-syariah",
-        "nama_display": "Trimegah Kas Syariah",
-        "jenis": "unknown",
-    },
-    "SUCORINVEST_SHARIA_MONEY": {
-        "rd_code": "RD1669",
-        "slug": "sucorinvest-sharia-money-market-fund",
-        "nama_display": "Sucorinvest Sharia Money Market Fund",
-        "jenis": "unknown",
-    },
-    "BATAVIA_DANA_KAS_MAXIMA": {
-        "rd_code": "RD205",
-        "slug": "batavia-dana-kas-maxima",
-        "nama_display": "Batavia Dana Kas Maxima",
-        "jenis": "unknown",
-    },
-    "BNP_PARIPAS_SYARIAH": {
-        "rd_code": "RD424",
-        "slug": "bnp-paripas-pesona-syariah",
-        "nama_display": "BNP Paripas Pesona Syariah",
-        "jenis": "unknown",
-    },
-    "BNI_AM_INDEX": {
-        "rd_code": "RD337",
-        "slug": "bni-am-indexs",
-        "nama_display": "BNI AM Indexs",
-        "jenis": "unknown",
-    },
-    "MANDIRI_INVESTA_SYARIAH": {
-        "rd_code": "RD860",
-        "slug": "mandiri-investa-dana-syariah-kelas-a",
-        "nama_display": "Mandiri Investa Dana Syariah Kelas A",
-        "jenis": "unknown",
-    },
-    "TRIMEGAH_DANA_SYARIAH": {
-        "rd_code": "RD3480",
-        "slug": "trimegah-dana-tetap-syariah-kelas-a",
-        "nama_display": "Trimegah Dana Tetap Syariah Kelas A",
-        "jenis": "unknown",
-    },
-    "BNI_AM_PENDAPATAN_TETAP_SYARIAH": {
-        "rd_code": "RD332",
-        "slug": "bni-am-pendapatan-tetap-syariah-ardhani",
-        "nama_display": "BNI-AM Pendapatan Tetap Syariah Ardhani",
-        "jenis": "unknown",
-    },
-    "MAJORIS_SUKUK_NEGARA": {
-        "rd_code": "RD838",
-        "slug": "majoris-sukuk-negara-indonesia",
-        "nama_display": "Majoris Sukuk Negara Indonesia",
-        "jenis": "unknown",
-    },
-    "BAHANA_MES_SYARIAH_G": {
-        "rd_code": "RD1721",
-        "slug": "bahana-mes-syariah-fund-kelas-g",
-        "nama_display": "Bahana MES Syariah Fund Kelas G",
-        "jenis": "unknown",
-    },
-    "MANULIFE_OBLIGASI_ID_II_A": {
-        "rd_code": "RD994",
-        "slug": "manulife-obligasi-negara-indonesia-ii-kelas-a",
-        "nama_display": "Manulife Obligasi Negara Indonesia II Kelas A",
-        "jenis": "unknown",
-    },
-    "BNP_PARIPAS_SUKUK_RK1": {
-        "rd_code": "RD6524",
-        "slug": "bnp-paripas-sukuk-negara-kelas-rk1",
-        "nama_display": "BNP Paripas Sukuk Negara Kelas RK1",
-        "jenis": "unknown",
-    },
-    "MAJORIS_PASAR_UANG_SYARIAH_ID": {
-        "rd_code": "RD832",
-        "slug": "majoris-pasar-uang-syariah-indonesia",
-        "nama_display": "Majoris Pasar Uang Syariah Indonesia",
-        "jenis": "unknown",
-    },
-    "BAHANA_LIKUID_SYARIAH": {
-        "rd_code": "RD3595",
-        "slug": "bahana-likuid-syariah-kelas-g",
-        "nama_display": "Bahana Likuid Syariah Kelas G",
-        "jenis": "unknown",
-    },
-    "TRIMEGAH_KAS_SYARIAH": {
-        "rd_code": "RD1775",
-        "slug": "trimegah-kas-syariah",
-        "nama_display": "Trimegah Kas Syariah",
-        "jenis": "unknown",
-    },
-    "SUCORINVEST_SHARIA_MONEY": {
-        "rd_code": "RD1669",
-        "slug": "sucorinvest-sharia-money-market-fund",
-        "nama_display": "Sucorinvest Sharia Money Market Fund",
-        "jenis": "unknown",
-    },
-    "BATAVIA_DANA_KAS_MAXIMA": {
-        "rd_code": "RD205",
-        "slug": "batavia-dana-kas-maxima",
-        "nama_display": "Batavia Dana Kas Maxima",
-        "jenis": "unknown",
-    }
-}
+
+def _load_reksa_mapping() -> dict:
+    """Load REKSA_MAPPING dari config/reksa_mapping.json"""
+    path = Path(__file__).parent.parent / "config" / "reksa_mapping.json"
+    if not path.exists():
+        logger.warning("[reksa] reksa_mapping.json tidak ditemukan, mapping kosong")
+        return {}
+    with open(path) as f:
+        return json.load(f)
 
 
 # =============================================================================
@@ -606,8 +191,9 @@ def fetch_all_reksa(watchlist: list = None, last_data: dict = None) -> dict:
             "fetch_time": "ISO string",
         }
     """
-    last_data   = last_data or {}
-    target_keys = watchlist if watchlist else list(REKSA_MAPPING.keys())
+    REKSA_MAPPING = _load_reksa_mapping()  # load fresh setiap run
+    last_data     = last_data or {}
+    target_keys   = watchlist if watchlist else list(REKSA_MAPPING.keys())
 
     results = {}
     stats   = {"total": 0, "ok": 0, "failed": 0, "cached": 0}
@@ -680,7 +266,7 @@ if __name__ == "__main__":
     )
 
     print("=" * 65)
-    print("OMNI-INVEST — Reksa Dana Auto-Fetch (Bibit simulations)")
+    print("OMNI-INVEST — Reksa Dana Auto-Fetch (Bibit)")
     print("=" * 65)
 
     data = fetch_all_reksa()

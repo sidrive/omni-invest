@@ -42,14 +42,19 @@ def save_portfolio():
             return jsonify({"status":"error", "message":"Data kosong"}), 400
         db = get_db()
         db.collection("portfolio").document("main").set(data)
-        with open("/home/sidrive/omni-invest/config/portfolio.json", "w") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        # Sync REKSA_MAPPING dari portfolio
-        reksa_list = data.get("reksadana", [])
-        _sync_reksa_mapping(reksa_list)
-        return jsonify({"status":"ok", "message":"Portfolio berhasil disimpan"})
     except Exception as e:
         return jsonify({"status":"error", "message":str(e)}), 500
+
+    try:
+        with open("/home/sidrive/omni-invest/config/portfolio.json", "w") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        app.logger.warning(f"Cache lokal gagal ditulis: {e}")
+
+    # Sync REKSA_MAPPING dari portfolio
+    reksa_list = data.get("reksadana", [])
+    _sync_reksa_mapping(reksa_list)
+    return jsonify({"status":"ok", "message":"Portfolio berhasil disimpan"})
 
 # ── API: GET MARKET DATA ──
 @app.route("/api/market", methods=["GET"])
@@ -150,10 +155,6 @@ def save_watchlist():
         saham_list = data.get("saham", [])
         _update_stock_fetcher(saham_list)
 
-        # Update file reksa_fetcher.py
-        reksa_list = data.get("reksa", [])
-        _update_reksa_fetcher(reksa_list)
-
         return jsonify({"status": "ok", "message": "Watchlist berhasil disimpan"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -215,13 +216,15 @@ def _update_stock_fetcher(saham_list: list):
         f.write(content)
 
 def _sync_reksa_mapping(reksa_list: list):
-    """Sync REKSA_MAPPING di reksa_fetcher.py dari data portfolio"""
+    """Sync REKSA_MAPPING ke config/reksa_mapping.json dari data portfolio"""
     import re
-    path = "/home/sidrive/omni-invest/scavenger/reksa_fetcher.py"
-    with open(path, "r") as f:
-        content = f.read()
+    path = Path("/home/sidrive/omni-invest/config/reksa_mapping.json")
 
-    items = []
+    existing = {}
+    if path.exists():
+        with open(path) as f:
+            existing = json.load(f)
+
     for r in reksa_list:
         rd_code = r.get("rd_code", "").strip().upper()
         kode_id = r.get("id", "").strip().upper()
@@ -230,56 +233,18 @@ def _sync_reksa_mapping(reksa_list: list):
             continue
         slug = nama.lower()
         slug = re.sub(r'[^a-z0-9]+', '-', slug).strip('-')
-        items.append(
-            f'    "{kode_id}": {{\n'
-            f'        "rd_code": "{rd_code}",\n'
-            f'        "slug": "{slug}",\n'
-            f'        "nama_display": "{nama}",\n'
-            f'        "jenis": "unknown",\n'
-            f'    }}'
-        )
-
-    if not items:
-        return
-
-    new_mapping = 'REKSA_MAPPING = {\n' + ',\n'.join(items) + '\n}'
-    new_content = re.sub(
-        r'REKSA_MAPPING\s*=\s*\{.*?\}',
-        new_mapping,
-        content,
-        flags=re.DOTALL
-    )
-    with open(path, "w") as f:
-        f.write(new_content)
-
-def _update_reksa_fetcher(reksa_list: list):
-    """Update REKSA_WATCHLIST di reksa_fetcher.py"""
-    path = "/home/sidrive/omni-invest/scavenger/reksa_fetcher.py"
-    with open(path, "r") as f:
-        content = f.read()
-
-    items = []
-    for r in reksa_list:
-        items.append(
-            f'    {{\n'
-            f'        "id": "{r["id"]}",\n'
-            f'        "name": "{r["nama"]}",\n'
-            f'        "source": "manual"\n'
-            f'    }}'
-        )
-    new_watchlist = f'REKSA_WATCHLIST = [\n' + ',\n'.join(items) + '\n]'
-
-    import re
-    content = re.sub(
-        r'REKSA_WATCHLIST\s*=\s*\[.*?\]',
-        new_watchlist,
-        content,
-        flags=re.DOTALL
-    )
+        existing[kode_id] = {
+            "rd_code":      rd_code,
+            "slug":         slug,
+            "nama_display": nama,
+            "jenis":        "unknown"
+        }
 
     with open(path, "w") as f:
-        f.write(content)
-        
+        json.dump(existing, f, indent=2, ensure_ascii=False)
+
+    app.logger.info(f"[reksa] REKSA_MAPPING synced: {len(existing)} entri → reksa_mapping.json")
+
 # ── API: GOLD HISTORY ──
 @app.route("/api/gold-history", methods=["GET"])
 def get_gold_history():

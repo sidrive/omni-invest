@@ -19,3 +19,7 @@ data/
 
 node_modules/
 
+# Runtime files — di-generate otomatis, jangan di-commit
+config/portfolio.json
+config/reksa_mapping.json
+
