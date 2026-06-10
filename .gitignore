@@ -19,6 +19,8 @@ data/
 
 node_modules/
 
+deploy.sh
+
 # Runtime files — di-generate otomatis, jangan di-commit
 config/portfolio.json
 config/reksa_mapping.json
