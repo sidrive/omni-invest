@@ -1,7 +1,7 @@
 """Omni-Invest Dashboard Server + API"""
 from flask import Flask, send_from_directory, request, jsonify
 from flask_cors import CORS
-import json, os, sys
+import json, os, sys, threading
 from pathlib import Path
 
 app = Flask(__name__)
@@ -15,23 +15,63 @@ load_dotenv("/home/sidrive/omni-invest/config/.env")
 import firebase_admin
 from firebase_admin import credentials, firestore
 
+PROJECT_DIR = os.environ.get("PROJECT_DIR", "/home/sidrive/omni-invest")
+LOCAL_PORTFOLIO_PATH = os.path.join(PROJECT_DIR, "config", "portfolio.json")
+
 def get_db():
     if not firebase_admin._apps:
         cred = credentials.Certificate(os.getenv("FIREBASE_KEY_PATH"))
         firebase_admin.initialize_app(cred)
     return firestore.client()
 
+def _load_portfolio_local() -> dict | None:
+    """Baca portfolio dari local JSON — primary source of truth."""
+    try:
+        if os.path.exists(LOCAL_PORTFOLIO_PATH):
+            with open(LOCAL_PORTFOLIO_PATH, "r") as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"[WARN] Gagal baca portfolio lokal: {e}")
+    return None
+
+def _save_portfolio_local(portfolio: dict) -> bool:
+    """Tulis portfolio ke local JSON — synchronous, source of truth."""
+    try:
+        os.makedirs(os.path.dirname(LOCAL_PORTFOLIO_PATH), exist_ok=True)
+        with open(LOCAL_PORTFOLIO_PATH, "w") as f:
+            json.dump(portfolio, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"[ERROR] Gagal simpan portfolio lokal: {e}")
+        return False
+
+def _sync_firestore_async(portfolio: dict):
+    """Sync portfolio ke Firestore di background — non-blocking, best effort."""
+    def _write():
+        try:
+            db = get_db()
+            db.collection("portfolio").document("main").set(portfolio)
+            print("[INFO] Firestore portfolio sync OK")
+        except Exception as e:
+            print(f"[WARN] Firestore sync gagal (non-critical): {e}")
+    threading.Thread(target=_write, daemon=True).start()
+
 # ── API: GET PORTFOLIO ──
 @app.route("/api/portfolio", methods=["GET"])
 def get_portfolio():
     try:
+        # Primary: baca dari local JSON
+        data = _load_portfolio_local()
+        if data:
+            return jsonify({"status": "ok", "data": data})
+        # Fallback: baca dari Firestore jika local tidak ada
         db = get_db()
         doc = db.collection("portfolio").document("main").get()
         if doc.exists:
-            return jsonify({"status":"ok", "data": doc.to_dict()})
-        return jsonify({"status":"error", "message":"Portfolio tidak ditemukan"}), 404
+            return jsonify({"status": "ok", "data": doc.to_dict()})
+        return jsonify({"status": "error", "message": "Portfolio tidak ditemukan"}), 404
     except Exception as e:
-        return jsonify({"status":"error", "message":str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 # ── API: SAVE PORTFOLIO ──
 @app.route("/api/portfolio", methods=["POST"])
@@ -39,22 +79,19 @@ def save_portfolio():
     try:
         data = request.get_json()
         if not data:
-            return jsonify({"status":"error", "message":"Data kosong"}), 400
-        db = get_db()
-        db.collection("portfolio").document("main").set(data)
+            return jsonify({"status": "error", "message": "Data kosong"}), 400
+        # Tulis ke local JSON (synchronous)
+        ok = _save_portfolio_local(data)
+        if not ok:
+            return jsonify({"status": "error", "message": "Gagal simpan portfolio lokal"}), 500
+        # Sync ke Firestore (async, non-blocking)
+        _sync_firestore_async(data)
+        # Sync reksa_mapping dari data portfolio baru
+        reksa_list = data.get("reksadana", [])
+        _sync_reksa_mapping(reksa_list)
+        return jsonify({"status": "ok", "message": "Portfolio berhasil disimpan"})
     except Exception as e:
-        return jsonify({"status":"error", "message":str(e)}), 500
-
-    try:
-        with open("/home/sidrive/omni-invest/config/portfolio.json", "w") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        app.logger.warning(f"Cache lokal gagal ditulis: {e}")
-
-    # Sync REKSA_MAPPING dari portfolio
-    reksa_list = data.get("reksadana", [])
-    _sync_reksa_mapping(reksa_list)
-    return jsonify({"status":"ok", "message":"Portfolio berhasil disimpan"})
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 # ── API: GET MARKET DATA ──
 @app.route("/api/market", methods=["GET"])
@@ -217,14 +254,13 @@ def validate_ticker():
         })
 
 def _update_portfolio_after_transaction(db, jenis_aset, kode, aksi, qty, harga):
-    """Update portfolio Firestore setelah transaksi BUY/SELL."""
+    """Update portfolio lokal setelah transaksi BUY/SELL — tidak pernah baca Firestore."""
     field_map = {
-        "saham": {"qty": "qty_lot",  "avg": "avg_buy_price", "list": "saham"},
-        "reksa": {"qty": "qty_unit", "avg": "avg_buy_nab",   "list": "reksadana"},
-        "emas":  {"qty": "qty_gram", "avg": "avg_buy_price", "list": "emas"},
-        "valas": {"qty": "qty_unit", "avg": "avg_buy_rate",  "list": "valas"},
+        "saham": {"qty": "qty_lot",   "avg": "avg_buy_price", "list": "saham"},
+        "reksa": {"qty": "qty_unit",  "avg": "avg_buy_nab",   "list": "reksadana"},
+        "emas":  {"qty": "qty_gram",  "avg": "avg_buy_price", "list": "emas"},
+        "valas": {"qty": "qty_unit",  "avg": "avg_buy_rate",  "list": "valas"},
     }
-
     if jenis_aset not in field_map:
         return False, f"Jenis aset tidak dikenal: {jenis_aset}"
 
@@ -233,12 +269,11 @@ def _update_portfolio_after_transaction(db, jenis_aset, kode, aksi, qty, harga):
     avg_field = fields["avg"]
     list_key  = fields["list"]
 
-    port_ref = db.collection("portfolio").document("main")
-    port_doc = port_ref.get()
-    if not port_doc.exists:
-        return False, "Portfolio tidak ditemukan di Firestore"
+    # Baca dari local JSON — tidak pernah baca Firestore
+    portfolio = _load_portfolio_local()
+    if portfolio is None:
+        return False, "File portfolio.json tidak ditemukan. Simpan portfolio dulu via Settings."
 
-    portfolio  = port_doc.to_dict()
     asset_list = portfolio.get(list_key, [])
 
     def match_asset(a):
@@ -273,8 +308,8 @@ def _update_portfolio_after_transaction(db, jenis_aset, kode, aksi, qty, harga):
     elif aksi == "SELL":
         if qty > old_qty:
             return False, f"Qty jual ({qty}) melebihi qty tersedia ({old_qty})"
-        new_qty = old_qty - qty
-        asset[qty_field] = round(new_qty) if jenis_aset == "saham" else round(new_qty, 4)
+        new_qty = round(old_qty - qty, 0 if jenis_aset == "saham" else 4)
+        asset[qty_field] = new_qty
         if new_qty == 0:
             asset["status"] = "CLOSED"
         else:
@@ -282,9 +317,16 @@ def _update_portfolio_after_transaction(db, jenis_aset, kode, aksi, qty, harga):
     else:
         return False, f"Aksi tidak dikenal: {aksi}"
 
-    asset_list[idx]  = asset
+    asset_list[idx] = asset
     portfolio[list_key] = asset_list
-    port_ref.set(portfolio)
+
+    # Tulis ke local JSON (synchronous)
+    ok = _save_portfolio_local(portfolio)
+    if not ok:
+        return False, "Gagal menyimpan portfolio lokal"
+
+    # Sync ke Firestore (async, non-blocking)
+    _sync_firestore_async(portfolio)
 
     if jenis_aset == "reksa":
         try:
@@ -395,7 +437,6 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"⚠️  Warmup warning: {e}")
 
-    import threading
     threading.Thread(target=warmup, daemon=True).start()
 
     app.run(host="0.0.0.0", port=4500, debug=False)
