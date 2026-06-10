@@ -123,7 +123,9 @@ def save_portfolio():
         # Sync reksa_mapping dari data portfolio baru
         reksa_list = data.get("reksadana", [])
         _sync_reksa_mapping(reksa_list)
-        return jsonify({"status": "ok", "message": "Portfolio berhasil disimpan"})
+        # Auto-trigger pipeline agar analyst report terupdate
+        _trigger_pipeline_async()
+        return jsonify({"status": "ok", "message": "Portfolio disimpan. Analyst report sedang diperbarui..."})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
