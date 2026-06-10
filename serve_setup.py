@@ -86,7 +86,7 @@ def get_transactions():
     try:
         db = get_db()
         docs = db.collection("transactions").order_by(
-            "tanggal", direction=firestore.Query.DESCENDING
+            "timestamp", direction=firestore.Query.DESCENDING
         ).limit(50).stream()
         txs = [{"id": d.id, **d.to_dict()} for d in docs]
         return jsonify({"status":"ok", "data": txs})
@@ -101,6 +101,9 @@ def save_transaction():
         if not data:
             return jsonify({"status":"error", "message":"Data kosong"}), 400
         db = get_db()
+        from datetime import datetime, timezone
+        if not data.get("timestamp"):
+            data["timestamp"] = datetime.now(timezone.utc).isoformat()
         db.collection("transactions").add(data)
         return jsonify({"status":"ok", "message":"Transaksi disimpan"})
     except Exception as e:

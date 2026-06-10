@@ -151,7 +151,7 @@ Semua endpoint mengembalikan format `{"status": "ok"|"error", "data": ..., "mess
 | `market_data` | `latest` | Harga emas, saham, reksadana, valas — di-update tiap Scavenger |
 | `analyst_report` | `latest` | P&L, sinyal, alokasi — di-update tiap pipeline selesai |
 | `portfolio` | `main` | Data aset user — single source of truth |
-| `transactions` | auto-id | Riwayat transaksi, di-query order by `tanggal` DESC limit 50 |
+| `transactions` | auto-id | Riwayat transaksi, di-query order by `timestamp` DESC limit 50 |
 | `config` | `watchlist` | Daftar saham dipantau: `{ "saham": [...], "reksa": [...] }` |
 
 ---
