@@ -100,12 +100,32 @@ def save_transaction():
         data = request.get_json()
         if not data:
             return jsonify({"status":"error", "message":"Data kosong"}), 400
+
+        jenis_aset = data.get("jenis_aset", "")
+        kode       = data.get("kode", "")
+        aksi       = data.get("aksi", "").upper()
+        qty        = float(data.get("qty", 0))
+        harga      = float(data.get("harga", 0))
+
+        if not all([jenis_aset, kode, aksi, qty, harga]):
+            return jsonify({"status":"error", "message":"Field tidak lengkap"}), 400
+
         db = get_db()
+
+        # Update portfolio dulu — jika gagal, transaksi tidak disimpan
+        ok, msg = _update_portfolio_after_transaction(db, jenis_aset, kode, aksi, qty, harga)
+        if not ok:
+            return jsonify({"status":"error", "message": msg}), 400
+
         from datetime import datetime, timezone
         if not data.get("timestamp"):
             data["timestamp"] = datetime.now(timezone.utc).isoformat()
+        # Preserve frontend-computed total (handles saham lot-size); fallback if missing
+        if not data.get("total"):
+            data["total"] = round(qty * 100 * harga, 0) if jenis_aset == "saham" else round(qty * harga, 4)
         db.collection("transactions").add(data)
-        return jsonify({"status":"ok", "message":"Transaksi disimpan"})
+
+        return jsonify({"status":"ok", "message": f"Transaksi {aksi} {kode} berhasil. {msg}"})
     except Exception as e:
         return jsonify({"status":"error", "message":str(e)}), 500
 
@@ -195,6 +215,85 @@ def validate_ticker():
             "valid"  : False,
             "message": f"Ticker tidak valid: {str(e)}"
         })
+
+def _update_portfolio_after_transaction(db, jenis_aset, kode, aksi, qty, harga):
+    """Update portfolio Firestore setelah transaksi BUY/SELL."""
+    field_map = {
+        "saham": {"qty": "qty_lot",  "avg": "avg_buy_price", "list": "saham"},
+        "reksa": {"qty": "qty_unit", "avg": "avg_buy_nab",   "list": "reksadana"},
+        "emas":  {"qty": "qty_gram", "avg": "avg_buy_price", "list": "emas"},
+        "valas": {"qty": "qty_unit", "avg": "avg_buy_rate",  "list": "valas"},
+    }
+
+    if jenis_aset not in field_map:
+        return False, f"Jenis aset tidak dikenal: {jenis_aset}"
+
+    fields    = field_map[jenis_aset]
+    qty_field = fields["qty"]
+    avg_field = fields["avg"]
+    list_key  = fields["list"]
+
+    port_ref = db.collection("portfolio").document("main")
+    port_doc = port_ref.get()
+    if not port_doc.exists:
+        return False, "Portfolio tidak ditemukan di Firestore"
+
+    portfolio  = port_doc.to_dict()
+    asset_list = portfolio.get(list_key, [])
+
+    def match_asset(a):
+        if jenis_aset == "valas":
+            return a.get("code", "").upper() == kode.upper()
+        return a.get("id", "").upper() == kode.upper()
+
+    idx = next((i for i, a in enumerate(asset_list) if match_asset(a)), None)
+    if idx is None:
+        return False, f"Aset '{kode}' tidak ditemukan di portfolio. Tambah dulu via Settings."
+
+    asset   = asset_list[idx]
+    old_qty = float(asset.get(qty_field, 0) or 0)
+    old_avg = float(asset.get(avg_field, 0) or 0)
+
+    if aksi == "BUY":
+        new_qty = old_qty + qty
+        new_avg = harga if old_qty == 0 else (old_qty * old_avg + qty * harga) / new_qty
+        if jenis_aset == "saham":
+            new_qty = round(new_qty)
+            new_avg = round(new_avg, 0)
+        elif jenis_aset == "valas":
+            new_qty = round(new_qty, 2)
+            new_avg = round(new_avg, 4)
+        else:
+            new_qty = round(new_qty, 4)
+            new_avg = round(new_avg, 2)
+        asset[qty_field] = new_qty
+        asset[avg_field] = new_avg
+        asset.pop("status", None)
+
+    elif aksi == "SELL":
+        if qty > old_qty:
+            return False, f"Qty jual ({qty}) melebihi qty tersedia ({old_qty})"
+        new_qty = old_qty - qty
+        asset[qty_field] = round(new_qty) if jenis_aset == "saham" else round(new_qty, 4)
+        if new_qty == 0:
+            asset["status"] = "CLOSED"
+        else:
+            asset.pop("status", None)
+    else:
+        return False, f"Aksi tidak dikenal: {aksi}"
+
+    asset_list[idx]  = asset
+    portfolio[list_key] = asset_list
+    port_ref.set(portfolio)
+
+    if jenis_aset == "reksa":
+        try:
+            _sync_reksa_mapping(portfolio.get("reksadana", []))
+        except Exception:
+            pass
+
+    return True, "Portfolio berhasil diupdate"
+
 
 def _update_stock_fetcher(saham_list: list):
     """Update WATCHLIST di stock_fetcher.py"""
