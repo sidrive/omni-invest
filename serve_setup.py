@@ -1,7 +1,7 @@
 """Omni-Invest Dashboard Server + API"""
 from flask import Flask, send_from_directory, request, jsonify
 from flask_cors import CORS
-import json, os, sys, threading
+import json, os, sys, threading, time
 from pathlib import Path
 
 app = Flask(__name__)
@@ -17,6 +17,10 @@ from firebase_admin import credentials, firestore
 
 PROJECT_DIR = os.environ.get("PROJECT_DIR", "/home/sidrive/omni-invest")
 LOCAL_PORTFOLIO_PATH = os.path.join(PROJECT_DIR, "config", "portfolio.json")
+
+_pipeline_last_run = 0
+_pipeline_running  = False
+PIPELINE_COOLDOWN  = 300
 
 def get_db():
     if not firebase_admin._apps:
@@ -55,6 +59,36 @@ def _sync_firestore_async(portfolio: dict):
         except Exception as e:
             print(f"[WARN] Firestore sync gagal (non-critical): {e}")
     threading.Thread(target=_write, daemon=True).start()
+
+def _trigger_pipeline_async():
+    """Jalankan pipeline di background setelah transaksi, dengan cooldown 5 menit."""
+    global _pipeline_last_run, _pipeline_running
+
+    now = time.time()
+    if _pipeline_running:
+        print("[INFO] Pipeline sedang berjalan, skip auto-trigger")
+        return
+    if now - _pipeline_last_run < PIPELINE_COOLDOWN:
+        sisa = int(PIPELINE_COOLDOWN - (now - _pipeline_last_run))
+        print(f"[INFO] Pipeline cooldown aktif, skip auto-trigger ({sisa}s lagi)")
+        return
+
+    def _run():
+        global _pipeline_last_run, _pipeline_running
+        _pipeline_running = True
+        _pipeline_last_run = time.time()
+        try:
+            print("[INFO] Auto-trigger pipeline setelah transaksi...")
+            sys.path.insert(0, PROJECT_DIR)
+            from main import run
+            run()
+            print("[INFO] Auto-trigger pipeline selesai")
+        except Exception as e:
+            print(f"[WARN] Auto-trigger pipeline error: {e}")
+        finally:
+            _pipeline_running = False
+
+    threading.Thread(target=_run, daemon=True).start()
 
 # ── API: GET PORTFOLIO ──
 @app.route("/api/portfolio", methods=["GET"])
@@ -157,12 +191,14 @@ def save_transaction():
         from datetime import datetime, timezone
         if not data.get("timestamp"):
             data["timestamp"] = datetime.now(timezone.utc).isoformat()
-        # Preserve frontend-computed total (handles saham lot-size); fallback if missing
         if not data.get("total"):
-            data["total"] = round(qty * 100 * harga, 0) if jenis_aset == "saham" else round(qty * harga, 4)
+            data["total"] = round(qty * harga, 4)
         db.collection("transactions").add(data)
 
-        return jsonify({"status":"ok", "message": f"Transaksi {aksi} {kode} berhasil. {msg}"})
+        # Auto-trigger pipeline di background (dengan cooldown)
+        _trigger_pipeline_async()
+
+        return jsonify({"status": "ok", "message": f"Transaksi {aksi} {kode} berhasil disimpan. Analyst report sedang diperbarui..."})
     except Exception as e:
         return jsonify({"status":"error", "message":str(e)}), 500
 
