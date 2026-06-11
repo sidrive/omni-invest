@@ -23,6 +23,7 @@ WIB = ZoneInfo("Asia/Jakarta")
 SIGNAL_SELL_THRESHOLD    =  2.0   # % kenaikan kurs → pertimbangkan jual/konversi
 SIGNAL_BUY_THRESHOLD     = -1.5   # % penurunan kurs → peluang beli valas
 STOPLOSS_PL_THRESHOLD    = -5.0   # % P&L aset → warning stop loss
+BUY_THRESHOLD            = SIGNAL_BUY_THRESHOLD
 
 
 def analyze_valas(portfolio_valas: list, valas_rates: dict) -> dict:
@@ -58,8 +59,12 @@ def analyze_valas(portfolio_valas: list, valas_rates: dict) -> dict:
         # Ambil data kurs terkini
         rate_data    = valas_rates.get(code, {})
         current_rate = rate_data.get("rate")
-        change_pct   = rate_data.get("change_pct", 0.0)
+        change_pct   = rate_data.get("change_pct")
         status       = rate_data.get("status", "error")
+
+        # Safe display values — untuk f-string dan round(), jangan ubah current_rate asli
+        display_rate       = current_rate if current_rate is not None else 0.0
+        display_change_pct = change_pct   if change_pct   is not None else 0.0
 
         # Kalkulasi
         modal_idr  = qty * avg_buy_rate
@@ -85,14 +90,14 @@ def analyze_valas(portfolio_valas: list, valas_rates: dict) -> dict:
             priority      = "critical"
             signal_reason = (
                 f"P&L {pl_pct:+.2f}% — kurs {code}/IDR melemah signifikan "
-                f"dari Rp{avg_buy_rate:,.0f} → Rp{current_rate:,.0f}"
+                f"dari Rp{avg_buy_rate:,.0f} → Rp{display_rate:,.0f}"
             )
 
         elif change_pct is not None and change_pct >= SIGNAL_SELL_THRESHOLD:
             signal        = "SELL_PARTIAL"
             priority      = "medium"
             signal_reason = (
-                f"Kurs {code}/IDR naik {change_pct:+.2f}% hari ini "
+                f"Kurs {code}/IDR naik {display_change_pct:+.2f}% hari ini "
                 f"→ pertimbangkan konversi sebagian ke IDR"
             )
 
@@ -100,7 +105,7 @@ def analyze_valas(portfolio_valas: list, valas_rates: dict) -> dict:
             signal        = "BUY"
             priority      = "high"
             signal_reason = (
-                f"Kurs {code}/IDR turun {change_pct:+.2f}% hari ini "
+                f"Kurs {code}/IDR turun {display_change_pct:+.2f}% hari ini "
                 f"→ peluang beli valas lebih murah"
             )
 
@@ -152,10 +157,6 @@ def analyze_valas(portfolio_valas: list, valas_rates: dict) -> dict:
         "signals":     signals,
         "analyzed_at": datetime.now(WIB).isoformat(),
     }
-
-
-# ── Patch ke BUY_THRESHOLD (typo fix) ────────────────────────────────────
-BUY_THRESHOLD = SIGNAL_BUY_THRESHOLD
 
 
 # ── Test standalone ───────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 # OMNI-INVEST SENTINEL — BACKEND CONTEXT
 
 > Dokumen ini adalah referensi lengkap untuk AI assistant (Claude) saat membantu development backend Python Omni-Invest.
-> Last updated: 2026-06-10
+> Last updated: 2026-06-11
 
 ---
 
@@ -326,12 +326,13 @@ Dipanggil saat `POST /api/watchlist`. Menulis ulang variabel `WATCHLIST` di `sto
 # Penting: hasil harus array string, BUKAN array dict
 ```
 
-### `save_portfolio()` — Urutan Operasi
+### `save_portfolio()` — Urutan Operasi (diupdate 2026-06-11)
 
 ```python
-# 1. Firestore .set(data)  → UTAMA, fatal jika gagal (return 500)
-# 2. Tulis portfolio.json  → best effort, gagal hanya log warning (Firestore sudah aman)
-# 3. _sync_reksa_mapping() → sinkronisasi reksa_mapping.json dari data portfolio baru
+# 1. _save_portfolio_local(data)   → UTAMA, fatal jika gagal (return 500)
+# 2. _sync_firestore_async(data)   → async background thread, best effort
+# 3. _sync_reksa_mapping()         → sinkronisasi reksa_mapping.json dari data portfolio baru
+# 4. _trigger_pipeline_async()     → auto-trigger pipeline di background
 ```
 
 ### `get_db()`
@@ -352,19 +353,175 @@ Lazy-init Firebase Admin SDK. Memeriksa `firebase_admin._apps` terlebih dulu aga
 
 ---
 
+## 🏗️ ARSITEKTUR LOCAL-FIRST PORTFOLIO
+
+STB S905x mengalami Firestore gRPC timeout (read DAN write) secara intermittent.
+Solusi: `config/portfolio.json` sebagai single source of truth.
+
+### Helper Functions di `serve_setup.py`
+
+```
+LOCAL_PORTFOLIO_PATH = PROJECT_DIR + "/config/portfolio.json"
+
+_load_portfolio_local() → dict | None
+  Baca portfolio dari local JSON. Return None jika file tidak ada.
+
+_save_portfolio_local(portfolio: dict) → bool
+  Tulis portfolio ke local JSON secara synchronous.
+  Return True jika berhasil, False jika gagal.
+
+_sync_firestore_async(portfolio: dict)
+  Sync portfolio ke Firestore di background thread (daemon).
+  Non-blocking, best effort — error di-log tapi tidak di-raise.
+
+_update_portfolio_after_transaction(db, jenis_aset, kode, aksi, qty, harga)
+  Update portfolio menggunakan average cost method.
+  Baca dari local JSON, tulis ke local JSON + async Firestore.
+  Return: (success: bool, message: str)
+```
+
+**BELI:**
+```
+new_qty = old_qty + qty
+new_avg = (old_qty × old_avg + qty × harga) / new_qty
+Hapus field "status" jika ada (reaktivasi aset CLOSED)
+```
+
+**JUAL:**
+```
+new_qty = old_qty - qty
+avg tidak berubah (cost basis tetap)
+new_qty == 0 → set status = "CLOSED"
+Tolak jika qty > old_qty
+```
+
+**Validasi:**
+- Tolak jika `jenis_aset` tidak dikenal
+- Tolak jika kode tidak ada di portfolio → error 400
+- Tolak jika qty jual > qty tersedia → error 400
+
+**Field map per jenis:**
+
+| jenis_aset | qty field | avg field | list key |
+|---|---|---|---|
+| `saham` | `qty_lot` | `avg_buy_price` | `saham` |
+| `reksa` | `qty_unit` | `avg_buy_nab` | `reksadana` |
+| `emas` | `qty_gram` | `avg_buy_price` | `emas` |
+| `valas` | `qty_unit` | `avg_buy_rate` | `valas` |
+
+**Match aset:** valas cocokkan via `a["code"]`, lainnya via `a["id"]` (case-insensitive)
+
+### Strategi per endpoint
+
+```
+GET  /api/portfolio  → local JSON primary, Firestore fallback
+POST /api/portfolio  → _save_portfolio_local() + _sync_firestore_async()
+                     + _sync_reksa_mapping() + _trigger_pipeline_async()
+POST /api/transactions → _update_portfolio_after_transaction()
+                       + simpan ke Firestore transactions collection
+                       + _trigger_pipeline_async()
+```
+
+---
+
+## 🔄 AUTO-TRIGGER PIPELINE
+
+Pipeline otomatis berjalan di background setelah transaksi dan save portfolio.
+
+### State tracking (global di `serve_setup.py`)
+
+```python
+_pipeline_last_run: float = 0       # timestamp last run (time.time())
+_pipeline_running: bool  = False    # flag sedang berjalan
+PIPELINE_COOLDOWN: int   = 300      # 5 menit cooldown antar auto-trigger
+```
+
+### `_trigger_pipeline_async()`
+
+- Skip jika `_pipeline_running == True` — log dan return
+- Skip jika waktu sejak last run < `PIPELINE_COOLDOWN` — log sisa detik dan return
+- Jalankan `main.run()` di daemon thread
+- Set `_pipeline_running = True` sebelum run, `False` di `finally`
+- Set `_pipeline_last_run = time.time()` di awal thread
+
+### Dipanggil dari
+
+- `POST /api/transactions` — setelah transaksi berhasil disimpan ke Firestore
+- `POST /api/portfolio` — setelah portfolio berhasil disimpan ke local JSON
+
+---
+
+## 💳 TRANSACTIONS
+
+### Struktur dokumen Firestore (collection: `transactions`)
+
+```python
+{
+  "jenis_aset": "saham"|"reksa"|"emas"|"valas",  # lowercase!
+  "aksi":       "BUY"|"SELL",
+  "kode":       str,    # id aset di portfolio (match ke field "id")
+  "nama":       str,
+  "qty":        float,
+  "harga":      float,
+  "total":      float,  # qty × harga, dihitung backend
+  "catatan":    str,
+  "timestamp":  str     # ISO 8601 — SELALU ada, dipakai untuk order_by
+}
+```
+
+### `GET /api/transactions`
+
+```python
+db.collection("transactions").order_by("timestamp", direction=DESCENDING).limit(50)
+# BUKAN order_by("tanggal") — field yang benar adalah "timestamp"
+```
+
+### `POST /api/transactions` — urutan operasi
+
+```
+1. Validasi field wajib: jenis_aset, kode, aksi, qty, harga
+2. _update_portfolio_after_transaction() — jika gagal → return 400
+3. Set timestamp jika tidak ada dari client
+4. Hitung total = qty × harga (fallback, frontend biasanya kirim total)
+5. db.collection("transactions").add(data)
+6. _trigger_pipeline_async()
+```
+
+---
+
+## 🧮 ANALYST ENGINE — Portfolio Loading
+
+### `engine.py _load_portfolio()`
+
+```
+Primary:  baca dari config/portfolio.json (local JSON)
+Fallback: baca dari Firestore jika file tidak ada
+          → setelah berhasil, cache ke portfolio.json untuk next time
+```
+
+Log yang diharapkan:
+```
+"✅ Portfolio loaded dari local JSON"                     ← normal
+"⚠️ portfolio.json tidak ada, mencoba Firestore..."       ← fallback
+"✅ Portfolio loaded dari Firestore (fallback)"            ← fallback berhasil
+"💾 Portfolio cached ke local JSON"                       ← cache ditulis
+```
+
+---
+
 ## 🐛 KNOWN ISSUES & WORKAROUND
 
 ### Firestore 504 Deadline Exceeded
 
 - **Sebab:** IPv6-related issue pada STB Armbian S905x (sudah di-disable via `sysctl`, masih kadang terjadi)
-- **Workaround:** `_load_portfolio()` di `engine.py` fallback ke `config/portfolio.json`
-- **Cache selalu fresh:** Setiap kali Firestore berhasil diakses, cache langsung diperbarui
+- **Solusi permanen (2026-06-11):** Arsitektur local-first — `config/portfolio.json` adalah source of truth, Firestore hanya di-sync async di background. Read/write portfolio tidak pernah blocking ke Firestore lagi.
+- **Sisa risiko:** `GET /api/market`, `GET /api/report`, `GET /api/transactions`, `GET /api/watchlist` masih baca Firestore secara synchronous.
 
 ### Report Tidak Terupdate Setelah Edit Portfolio
 
-- `/api/report` membaca hasil pipeline terakhir dari Firestore — bukan real-time
-- Perubahan portfolio tidak otomatis men-trigger pipeline
-- **Solusi:** Jalankan `POST /api/run` atau `python3 main.py` setelah edit portfolio
+- **Sebelum 2026-06-11:** Perubahan portfolio tidak otomatis men-trigger pipeline.
+- **Sekarang:** `POST /api/portfolio` dan `POST /api/transactions` otomatis memanggil `_trigger_pipeline_async()` — pipeline berjalan di background dalam 5 menit setelah operasi write (ada cooldown).
+- Jika perlu trigger segera: `POST /api/run` atau `python3 main.py`.
 
 ### SPA Routing — Route Order di Flask
 
@@ -411,11 +568,15 @@ pm2 logs omni-dashboard --lines 30
 8. **`target_allocation`** di Firestore/portfolio menggunakan key `"reksa"` (bukan `"reksadana"`)
 9. **`savePortfolio` payload** harus include **semua key**: `emas`, `saham`, `reksadana`, `valas`, `target_allocation` — key yang hilang akan di-overwrite kosong di Firestore
 10. **`config/portfolio.json` dan `reksa_mapping.json`** tidak boleh di-commit ke git — sudah ada di `.gitignore`
-11. **Firestore = single source of truth** — jangan tulis data langsung ke `portfolio.json`, selalu via `POST /api/portfolio`
+11. **`portfolio.json` = single source of truth** — Firestore adalah secondary sync. Jangan baca Firestore secara synchronous untuk operasi portfolio. Tulis ke `portfolio.json` dulu, Firestore menyusul async.
 12. **`current_nab`** adalah nama field NAB reksa dana di market data — bukan `nab`
 13. **JPY qty** = bilangan bulat tanpa desimal; valas lain boleh 2 desimal
 14. **`avg_buy_rate` valas** = kurs IDR saat beli, bukan total modal dalam IDR
 15. **Flask SPA catch-all** — route `/<path:path>` harus selalu **paling bawah** di `serve_setup.py`
+16. **`jenis_aset` di transaksi selalu lowercase** — `"saham"`, `"reksa"`, `"emas"`, `"valas"` (dipakai sebagai key di `field_map`)
+17. **field `timestamp` di collection `transactions`** — BUKAN `"tanggal"`. Dipakai untuk `order_by("timestamp", DESCENDING)`
+18. **`_trigger_pipeline_async()`** otomatis dipanggil setelah `POST /api/portfolio` dan `POST /api/transactions` — tidak perlu manual trigger dari client kecuali butuh segera
+19. **`_update_portfolio_after_transaction()` tidak pernah baca Firestore** — hanya baca/tulis `portfolio.json`, Firestore sync async setelahnya
 
 ---
 
@@ -435,7 +596,7 @@ pm2 logs omni-dashboard --lines 30
 
 ---
 
-_Last updated: 2026-06-10_
+_Last updated: 2026-06-11_
 _Stack: Python Flask + Firebase Firestore + FCM_
 _Server: Armbian S905x STB — IP: 192.168.192.81, Port: 4500_
 _Pipeline: Scavenger (fetch) → Analyst (kalkulasi) → Messenger (FCM)_
