@@ -123,6 +123,10 @@ def save_portfolio():
         # Sync reksa_mapping dari data portfolio baru
         reksa_list = data.get("reksadana", [])
         _sync_reksa_mapping(reksa_list)
+        # Sync WATCHLIST di stock_fetcher.py dari saham portfolio
+        saham_list = data.get("saham", [])
+        if saham_list:
+            _update_stock_fetcher(saham_list)
         # Auto-trigger pipeline agar analyst report terupdate
         _trigger_pipeline_async()
         return jsonify({"status": "ok", "message": "Portfolio disimpan. Analyst report sedang diperbarui..."})
@@ -376,26 +380,55 @@ def _update_portfolio_after_transaction(db, jenis_aset, kode, aksi, qty, harga):
 
 
 def _update_stock_fetcher(saham_list: list):
-    """Update WATCHLIST di stock_fetcher.py"""
-    path = "/home/sidrive/omni-invest/scavenger/stock_fetcher.py"
-    with open(path, "r") as f:
-        content = f.read()
+    """Update WATCHLIST di stock_fetcher.py.
 
-    # Buat string baru untuk WATCHLIST
-    items = ',\n    '.join([f'"{s["kode"]}"' for s in saham_list if s.get("kode")])
-    new_watchlist = f'WATCHLIST = [\n    {items},\n]'
+    saham_list bisa berupa:
+    - list dict dari portfolio: [{"id": "BBCA", ...}]
+    - list dict dari watchlist: [{"kode": "BBCA.JK", ...}]
+    """
+    try:
+        import re
+        tickers = set()
 
-    # Replace baris WATCHLIST yang lama
-    import re
-    content = re.sub(
-        r'WATCHLIST\s*=\s*\[.*?\]',
-        new_watchlist,
-        content,
-        flags=re.DOTALL
-    )
+        for s in saham_list:
+            kode = (s.get("id") or s.get("kode") or "").upper().strip()
+            if kode:
+                tickers.add(kode if kode.endswith(".JK") else f"{kode}.JK")
 
-    with open(path, "w") as f:
-        f.write(content)
+        # Merge dengan Firestore watchlist (best effort, non-blocking)
+        try:
+            db = get_db()
+            doc = db.collection("config").document("watchlist").get()
+            if doc.exists:
+                for item in doc.to_dict().get("saham", []):
+                    if isinstance(item, str):
+                        kode = item.upper().strip()
+                        if kode:
+                            tickers.add(kode if kode.endswith(".JK") else f"{kode}.JK")
+                    elif isinstance(item, dict):
+                        kode = (item.get("kode") or item.get("id") or "").upper().strip()
+                        if kode:
+                            tickers.add(kode if kode.endswith(".JK") else f"{kode}.JK")
+        except Exception as e:
+            app.logger.warning(f"[watchlist] Gagal merge Firestore watchlist: {e}")
+
+        tickers = sorted(tickers)
+        if not tickers:
+            return
+
+        fetcher_path = Path(__file__).parent / "scavenger" / "stock_fetcher.py"
+        content = fetcher_path.read_text()
+        new_list = json.dumps(tickers)
+        new_content = re.sub(
+            r'WATCHLIST\s*=\s*\[.*?\]',
+            f'WATCHLIST = {new_list}',
+            content,
+            flags=re.DOTALL
+        )
+        fetcher_path.write_text(new_content)
+        app.logger.info(f"✅ WATCHLIST updated: {tickers}")
+    except Exception as e:
+        app.logger.error(f"[watchlist] Gagal update stock_fetcher.py: {e}")
 
 def _sync_reksa_mapping(reksa_list: list):
     """Sync REKSA_MAPPING ke config/reksa_mapping.json dari data portfolio"""

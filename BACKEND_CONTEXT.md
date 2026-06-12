@@ -86,7 +86,7 @@ Semua endpoint didefinisikan di `serve_setup.py`. Base URL: `http://192.168.192.
 | Method | Endpoint | Fungsi |
 |---|---|---|
 | GET | `/api/portfolio` | Ambil portfolio dari Firestore |
-| POST | `/api/portfolio` | Simpan ke Firestore + tulis cache `portfolio.json` + sync `reksa_mapping.json` |
+| POST | `/api/portfolio` | Simpan ke Firestore + tulis cache `portfolio.json` + sync `reksa_mapping.json` + update `WATCHLIST` di `stock_fetcher.py` |
 | GET | `/api/market` | Data market terbaru dari Firestore |
 | GET | `/api/report` | Analyst report + sinyal dari Firestore |
 | GET | `/api/transactions` | Riwayat transaksi (limit 50, descending) |
@@ -94,7 +94,7 @@ Semua endpoint didefinisikan di `serve_setup.py`. Base URL: `http://192.168.192.
 | POST | `/api/run` | Trigger pipeline manual |
 | GET | `/api/gold-history` | Baca `data/gold_history.json` |
 | GET | `/api/watchlist` | Baca dari Firestore `config/watchlist` |
-| POST | `/api/watchlist` | Simpan watchlist + update `WATCHLIST` di `stock_fetcher.py` |
+| POST | `/api/watchlist` | Simpan watchlist ke Firestore + update `WATCHLIST` di `stock_fetcher.py` |
 | POST | `/api/validate-ticker` | Validasi ticker saham via Yahoo Finance |
 
 ### Struktur Response
@@ -318,21 +318,31 @@ Dipanggil otomatis setiap `POST /api/portfolio`. Menulis `config/reksa_mapping.j
 
 ### `_update_stock_fetcher(saham_list)`
 
-Dipanggil saat `POST /api/watchlist`. Menulis ulang variabel `WATCHLIST` di `stock_fetcher.py` via regex replace.
+Dipanggil dari `POST /api/watchlist` DAN `POST /api/portfolio`. Menulis ulang variabel `WATCHLIST` di `stock_fetcher.py` via regex replace.
 
 ```python
-# Input : saham_list dari watchlist["saham"], setiap item butuh field: kode
+# Input : saham_list bisa berupa:
+#         - list dict dari portfolio : [{"id": "BBCA", ...}]     ← field "id"
+#         - list dict dari watchlist : [{"kode": "BBCA.JK", ...}] ← field "kode"
+#         Fungsi menangani kedua format via: s.get("id") or s.get("kode")
 # Output: WATCHLIST = ["BBCA.JK", "BBRI.JK", ...] di stock_fetcher.py
-# Penting: hasil harus array string, BUKAN array dict
+# Merge : juga membaca Firestore config/watchlist (best-effort, try/except)
+#         agar ticker dari watchlist manual tidak hilang saat portfolio di-save
+# Path  : Path(__file__).parent / "scavenger" / "stock_fetcher.py" (relatif, bukan hardcoded)
+# Error : seluruh fungsi dibungkus try/except — tidak pernah crash save_portfolio()
+# Penting: hasil WATCHLIST harus array string, BUKAN array dict
 ```
 
-### `save_portfolio()` — Urutan Operasi (diupdate 2026-06-11)
+### `save_portfolio()` — Urutan Operasi (diupdate 2026-06-12)
 
 ```python
-# 1. _save_portfolio_local(data)   → UTAMA, fatal jika gagal (return 500)
-# 2. _sync_firestore_async(data)   → async background thread, best effort
-# 3. _sync_reksa_mapping()         → sinkronisasi reksa_mapping.json dari data portfolio baru
-# 4. _trigger_pipeline_async()     → auto-trigger pipeline di background
+# 1. _save_portfolio_local(data)      → UTAMA, fatal jika gagal (return 500)
+# 2. _sync_firestore_async(data)      → async background thread, best effort
+# 3. _sync_reksa_mapping()            → sinkronisasi reksa_mapping.json dari data portfolio baru
+# 4. _update_stock_fetcher(saham_list) → sync WATCHLIST di stock_fetcher.py ← DITAMBAHKAN 2026-06-12
+#                                        dipanggil sebelum pipeline agar Scavenger sudah
+#                                        membaca WATCHLIST terbaru (termasuk saham portfolio)
+# 5. _trigger_pipeline_async()        → auto-trigger pipeline di background
 ```
 
 ### `get_db()`
@@ -416,7 +426,7 @@ Tolak jika qty > old_qty
 ```
 GET  /api/portfolio  → local JSON primary, Firestore fallback
 POST /api/portfolio  → _save_portfolio_local() + _sync_firestore_async()
-                     + _sync_reksa_mapping() + _trigger_pipeline_async()
+                     + _sync_reksa_mapping() + _update_stock_fetcher() + _trigger_pipeline_async()
 POST /api/transactions → _update_portfolio_after_transaction()
                        + simpan ke Firestore transactions collection
                        + _trigger_pipeline_async()
@@ -596,7 +606,7 @@ pm2 logs omni-dashboard --lines 30
 
 ---
 
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-12_
 _Stack: Python Flask + Firebase Firestore + FCM_
 _Server: Armbian S905x STB — IP: 192.168.192.81, Port: 4500_
 _Pipeline: Scavenger (fetch) → Analyst (kalkulasi) → Messenger (FCM)_
